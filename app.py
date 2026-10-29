@@ -4,6 +4,7 @@ import subprocess
 import socket
 import threading
 import time
+import base64
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
@@ -151,6 +152,201 @@ def get_projector_status(target: str = None) -> dict:
         "details": state_out if is_online else "Não conectado"
     }
 
+FEEDBACK_HTML_CONTENT = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Feedback</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: rgba(10, 15, 30, 0.90);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #ffffff;
+    overflow: hidden;
+  }
+  .card {
+    background: linear-gradient(145deg, #1e293b, #0f172a);
+    border: 2px solid #38bdf8;
+    box-shadow: 0 25px 60px rgba(0,0,0,0.85), 0 0 45px rgba(56, 189, 248, 0.4);
+    border-radius: 28px;
+    padding: 38px 64px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    min-width: 480px;
+    animation: zoomIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes zoomIn {
+    from { transform: scale(0.75); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  .badge {
+    width: 84px;
+    height: 84px;
+    background: rgba(34, 197, 94, 0.18);
+    border: 3px solid #22c55e;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 22px;
+    box-shadow: 0 0 30px rgba(34, 197, 94, 0.5);
+  }
+  .badge svg {
+    width: 46px;
+    height: 46px;
+    stroke: #22c55e;
+    stroke-width: 3.5;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .msg-title {
+    font-size: 44px;
+    font-weight: 800;
+    color: #f8fafc;
+    margin-bottom: 10px;
+    letter-spacing: -0.5px;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+  }
+  .msg-sub {
+    font-size: 22px;
+    font-weight: 600;
+    color: #38bdf8;
+    margin-bottom: 28px;
+  }
+  .btn-close {
+    background: linear-gradient(135deg, #0284c7, #2563eb);
+    color: #ffffff;
+    font-size: 22px;
+    font-weight: 700;
+    padding: 14px 44px;
+    border: none;
+    border-radius: 16px;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(2, 132, 199, 0.45);
+    outline: none;
+    transition: all 0.2s;
+  }
+  .btn-close:focus, .btn-close:hover {
+    transform: scale(1.06);
+    background: linear-gradient(135deg, #38bdf8, #3b82f6);
+    box-shadow: 0 8px 25px rgba(56, 189, 248, 0.6);
+  }
+  .timer-bar {
+    width: 100%;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    margin-top: 26px;
+    overflow: hidden;
+  }
+  .timer-fill {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #38bdf8, #22c55e);
+    animation: countdown 3.0s linear forwards;
+  }
+  @keyframes countdown {
+    from { width: 100%; }
+    to { width: 0%; }
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="badge">
+    <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+  </div>
+  <div class="msg-title">Executado, acunha!</div>
+  <div class="msg-sub">Comando processado com sucesso</div>
+  <button id="closeBtn" class="btn-close" autofocus onclick="dismiss()">Fechar [OK]</button>
+  <div class="timer-bar">
+    <div class="timer-fill"></div>
+  </div>
+</div>
+<script>
+  function dismiss() {
+    try { window.close(); } catch(e) {}
+    try { history.back(); } catch(e) {}
+  }
+  document.addEventListener("keydown", function(e) {
+    dismiss();
+  });
+  setTimeout(dismiss, 3000);
+</script>
+</body>
+</html>"""
+
+_last_feedback_time = 0
+_feedback_lock = threading.Lock()
+
+def trigger_projector_feedback(target: str = None, message: str = "Executado, acunha!", force_dialog: bool = True):
+    """
+    Dispara feedback visual na tela grande do projetor Android via ADB:
+    1. Notificação nativa via 'cmd notification post'
+    2. Janela/diálogo flutuante na UI do Android com botão 'Fechar' e auto-close de 3 segundos
+    Executado em thread assíncrona para manter a resposta da API instantânea.
+    """
+    global _last_feedback_time
+    resolved = resolve_target(target)
+
+    def _worker():
+        global _last_feedback_time
+        try:
+            # 1. Notificação nativa do sistema Android
+            notif_cmd = [
+                "shell", "su", "2000", "cmd", "notification", "post",
+                "-S", "bigtext",
+                "-t", "Painel do Projetor",
+                "painel_feedback",
+                message
+            ]
+            run_adb(notif_cmd, target=resolved)
+
+            # Evita colisões se outro diálogo foi aberto recentemente
+            now = time.time()
+            with _feedback_lock:
+                if now - _last_feedback_time < 3.2 and not force_dialog:
+                    return
+                _last_feedback_time = now
+
+            # 2. Garante que o arquivo HTML de feedback existe no projetor
+            check_ok, _ = run_adb(["shell", "test", "-f", "/data/local/tmp/feedback.html"], target=resolved)
+            if not check_ok:
+                b64 = base64.b64encode(FEEDBACK_HTML_CONTENT.encode("utf-8")).decode("ascii")
+                write_cmd = [
+                    "shell",
+                    f'echo "{b64}" | base64 -d > /data/local/tmp/feedback.html && chmod 666 /data/local/tmp/feedback.html'
+                ]
+                run_adb(write_cmd, target=resolved)
+
+            # 3. Abre o diálogo flutuante na UI do Android
+            view_cmd = [
+                "shell", "am", "start",
+                "-a", "android.intent.action.VIEW",
+                "-d", "file:///data/local/tmp/feedback.html",
+                "-t", "text/html",
+                "com.android.htmlviewer/.HTMLViewerActivity"
+            ]
+            run_adb(view_cmd, target=resolved)
+
+            # 4. Aguarda 3.2s para exibição fluida e fecha com segurança
+            time.sleep(3.2)
+            run_adb(["shell", "am", "force-stop", "com.android.htmlviewer"], target=resolved)
+        except Exception as e:
+            print(f"[-] Erro ao disparar feedback no projetor: {e}")
+
+    threading.Thread(target=_worker, daemon=True).start()
+
 def execute_remote_command(cmd_name: str, target: str = None) -> dict:
     """Dispara eventos de tecla física do controle remoto no IP dinâmico."""
     resolved = resolve_target(target)
@@ -158,6 +354,8 @@ def execute_remote_command(cmd_name: str, target: str = None) -> dict:
 
     if cmd_clean in ["limpar", "otimizar", "kill_all"]:
         success, out = run_adb(["shell", "am", "kill-all"], target=resolved)
+        if success:
+            trigger_projector_feedback(target=resolved, message="Executado, acunha!", force_dialog=True)
         return {
             "status": "success" if success else "error",
             "command": cmd_clean,
@@ -176,6 +374,8 @@ def execute_remote_command(cmd_name: str, target: str = None) -> dict:
 
     keycode = KEYCODES[cmd_clean]
     success, out = run_adb(["shell", "input", "keyevent", str(keycode)], target=resolved)
+    if success and cmd_clean in ["power", "menu", "home"]:
+        trigger_projector_feedback(target=resolved, message="Executado, acunha!", force_dialog=False)
 
     return {
         "status": "success" if success else "error",
@@ -198,6 +398,8 @@ def launch_app(app_key_or_package: str, target: str = None) -> dict:
 
     cmd = ["shell", "monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"]
     success, out = run_adb(cmd, target=resolved)
+    if success:
+        trigger_projector_feedback(target=resolved, message="Executado, acunha!", force_dialog=True)
 
     return {
         "status": "success" if success else "error",
@@ -218,6 +420,8 @@ def send_text_to_projector(text: str, target: str = None) -> dict:
     escaped = re.sub(r'([\\`"\';|&<>$()])', r'\\\1', escaped)
 
     success, out = run_adb(["shell", "input", "text", escaped], target=resolved)
+    if success:
+        trigger_projector_feedback(target=resolved, message="Executado, acunha!", force_dialog=False)
     return {
         "status": "success" if success else "error",
         "action": "input_text",
@@ -380,6 +584,13 @@ def ws_touchpad_click(data):
         res = handle_touchpad_tap(target=target)
     emit("command_response", res)
 
+@socketio.on("trigger_feedback")
+def ws_trigger_feedback(data=None):
+    target = (data or {}).get("ip") if isinstance(data, dict) else None
+    msg = (data or {}).get("message", "Executado, acunha!") if isinstance(data, dict) else "Executado, acunha!"
+    trigger_projector_feedback(target=target, message=msg, force_dialog=True)
+    emit("command_response", {"status": "success", "message": msg, "target": resolve_target(target)})
+
 # ----------------- ROTAS REST (COMPATIBILIDADE E FETCH) -----------------
 
 @app.route("/")
@@ -411,6 +622,9 @@ def route_update_ip():
     st = get_projector_status()
     socketio.emit("status_update", st)
     
+    if connect_ok:
+        trigger_projector_feedback(target=get_projector_target(), message="Executado, acunha!", force_dialog=True)
+
     return jsonify({
         "status": "success" if connect_ok else "warning",
         "ip": get_projector_ip(),
@@ -523,10 +737,26 @@ def route_tailscale_status():
 @app.route("/api/tailscale/open", methods=["POST", "OPTIONS"])
 def route_tailscale_open():
     if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
-    ok, out = run_adb(["shell", "monkey", "-p", "com.tailscale.ipn", "-c", "android.intent.category.LAUNCHER", "1"])
+    target = resolve_target()
+    ok, out = run_adb(["shell", "monkey", "-p", "com.tailscale.ipn", "-c", "android.intent.category.LAUNCHER", "1"], target=target)
+    if ok:
+        trigger_projector_feedback(target=target, message="Executado, acunha!", force_dialog=True)
     return jsonify({
         "status": "success" if ok else "error",
-        "message": "Abrindo Tailscale no projetor..." if ok else f"Erro ao abrir Tailscale: {out}"
+        "message": "Abrindo Tailscale no projetor..." if ok else f"Erro ao abrir Tailscale: {out}",
+        "target": target
+    })
+
+# Rota de Feedback Visual no Projetor (Executado, acunha!)
+@app.route("/api/feedback", methods=["GET", "POST", "OPTIONS"])
+def route_feedback():
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    target = resolve_target()
+    trigger_projector_feedback(target=target, message="Executado, acunha!", force_dialog=True)
+    return jsonify({
+        "status": "success",
+        "message": "Executado, acunha!",
+        "target": target
     })
 
 # Rota Genérica para Comandos

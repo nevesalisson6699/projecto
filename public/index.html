@@ -1226,6 +1226,12 @@
         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
         <span>Otimizar Memória RAM (am kill-all)</span>
       </button>
+
+      <!-- Alerta Visual no Projetor (Executado, acunha!) -->
+      <button class="btn btn-vol" style="margin-top: 10px; width: 100%; justify-content: center; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.08); color: var(--accent-blue);" onclick="dispararFeedbackVisual()">
+        <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        <span>Feedback no Projetor: "Executado, acunha!"</span>
+      </button>
     </div>
 
     <!-- CONTEÚDO ABA 2: APPS -->
@@ -2075,11 +2081,14 @@
         socket.emit('send_app', { app: appKey, ip: currentIp });
       }
       try {
-        await apiFetch(`app/${appKey}`, {
+        const res = await apiFetch(`app/${appKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ip: currentIp })
         });
+        if (res && res.ok) {
+          showToast(`Executado, acunha! (${label})`);
+        }
       } catch (e) {}
     }
 
@@ -2092,7 +2101,27 @@
         socket.emit('send_command', { cmd: cmd, ip: currentIp });
       }
       try {
-        await apiFetch(cmd, {
+        const res = await apiFetch(cmd, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: currentIp })
+        });
+        if (res && res.ok && (cmd === 'otimizar' || cmd === 'limpar')) {
+          showToast('Executado, acunha!');
+        }
+      } catch (e) {}
+    }
+
+    // Disparo Manual do Feedback Visual no Projetor ("Executado, acunha!")
+    async function dispararFeedbackVisual() {
+      vibrar();
+      showToast('Executado, acunha!');
+      const currentIp = getProjectorIp();
+      if (socket && socket.connected) {
+        socket.emit('trigger_feedback', { ip: currentIp, message: 'Executado, acunha!' });
+      }
+      try {
+        await apiFetch('api/feedback', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ip: currentIp })
