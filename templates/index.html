@@ -3,14 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Painel do Projetor</title>
+  <title>Painel do Projetor - Nuvem & Local</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Socket.IO Client para comunicação WebSocket em tempo real na nuvem -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     :root {
       --bg-dark: #070b14;
-      --card-bg: rgba(18, 24, 41, 0.75);
+      --card-bg: rgba(18, 24, 41, 0.82);
       --card-border: rgba(255, 255, 255, 0.08);
       --btn-bg: #1e293b;
       --btn-hover: #334155;
@@ -21,6 +23,8 @@
       --accent-green-glow: rgba(34, 197, 94, 0.4);
       --accent-red: #ef4444;
       --accent-red-glow: rgba(239, 68, 68, 0.4);
+      --accent-amber: #f59e0b;
+      --accent-amber-glow: rgba(245, 158, 11, 0.4);
       --text-main: #f8fafc;
       --text-muted: #94a3b8;
     }
@@ -39,13 +43,14 @@
       background: radial-gradient(circle at 50% 0%, #172554 0%, #070b14 70%);
       min-height: 100vh;
       display: flex;
-      justify-content: center;
-      align-items: flex-start;
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: center;
       padding: 16px 12px 36px;
       color: var(--text-main);
     }
 
-    /* Card do Controle */
+    /* Container do Controle */
     .remote-card {
       width: 100%;
       max-width: 390px;
@@ -59,6 +64,7 @@
       display: flex;
       flex-direction: column;
       gap: 16px;
+      transition: all 0.3s ease;
     }
 
     /* Header */
@@ -84,6 +90,12 @@
       font-family: monospace;
     }
 
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     .status-badge {
       display: flex;
       align-items: center;
@@ -94,20 +106,139 @@
       border: 1px solid var(--card-border);
       font-size: 0.72rem;
       font-weight: 600;
+      transition: all 0.3s ease;
     }
 
     .status-dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
+      background: var(--accent-amber);
+      box-shadow: 0 0 10px var(--accent-amber-glow);
+      transition: all 0.3s ease;
+    }
+
+    .status-dot.online {
       background: var(--accent-green);
       box-shadow: 0 0 10px var(--accent-green-glow);
-      transition: all 0.3s ease;
     }
 
     .status-dot.offline {
       background: var(--accent-red);
       box-shadow: 0 0 10px var(--accent-red-glow);
+    }
+
+    .btn-settings {
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-settings:hover {
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: rotate(45deg);
+    }
+
+    .btn-settings svg {
+      width: 17px;
+      height: 17px;
+      fill: currentColor;
+    }
+
+    /* CARD INTERATIVO DE RECONEXÃO QUANDO OFFLINE */
+    .offline-card {
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(245, 158, 11, 0.08));
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 20px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 4px 16px rgba(239, 68, 68, 0.15);
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .offline-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #f87171;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
+    .offline-header svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    .offline-desc {
+      font-size: 0.72rem;
+      color: #cbd5e1;
+      line-height: 1.35;
+    }
+
+    .offline-input-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .offline-input {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      font-size: 0.8rem;
+      font-family: monospace;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    .offline-input:focus {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 10px var(--accent-blue-glow);
+    }
+
+    .btn-reconnect {
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 0 16px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .btn-reconnect:hover {
+      background: linear-gradient(135deg, #38bdf8, #0284c7);
+      box-shadow: 0 0 12px var(--accent-blue-glow);
+    }
+
+    .btn-reconnect:active {
+      transform: scale(0.96);
     }
 
     /* Sub-bar: App Atual */
@@ -368,6 +499,145 @@
       box-shadow: 0 0 22px var(--accent-green-glow);
     }
 
+    /* Modal de Configuração de API / Relay na Nuvem */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 16px;
+      z-index: 200;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s ease;
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-box {
+      width: 100%;
+      max-width: 360px;
+      background: #0f172a;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 28px;
+      padding: 22px 20px;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      transform: scale(0.95);
+      transition: all 0.25s ease;
+    }
+
+    .modal-overlay.active .modal-box {
+      transform: scale(1);
+    }
+
+    .modal-box h2 {
+      font-size: 1.05rem;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .modal-box p {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    .modal-input {
+      width: 100%;
+      padding: 11px 14px;
+      border-radius: 12px;
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #fff;
+      font-size: 0.82rem;
+      font-family: monospace;
+      outline: none;
+    }
+
+    .modal-input:focus {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 10px var(--accent-blue-glow);
+    }
+
+    .preset-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .chip {
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 5px 10px;
+      border-radius: 8px;
+      font-size: 0.68rem;
+      color: #cbd5e1;
+      cursor: pointer;
+    }
+
+    .chip:hover {
+      background: rgba(51, 65, 85, 0.8);
+      color: #fff;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .btn-modal {
+      flex: 1;
+      padding: 10px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-test {
+      background: #1e293b;
+      color: var(--accent-blue);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    .btn-save {
+      background: var(--accent-blue);
+      color: #0f172a;
+    }
+
+    .test-result {
+      font-size: 0.72rem;
+      padding: 6px 10px;
+      border-radius: 8px;
+      display: none;
+    }
+
+    .test-result.success {
+      display: block;
+      background: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+
+    .test-result.error {
+      display: block;
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
     /* Toast Notification */
     .toast {
       position: fixed;
@@ -418,11 +688,33 @@
     <div class="header">
       <div class="device-info">
         <h1>Painel do Projetor</h1>
-        <p>{{ projector_ip }}</p>
+        <p id="targetIpDisplay">{{ projector_ip|default('192.168.253.112') }}</p>
       </div>
-      <div class="status-badge" id="statusBadge">
-        <div class="status-dot" id="statusDot"></div>
-        <span id="statusText">Conectando...</span>
+      <div class="header-actions">
+        <div class="status-badge" id="statusBadge">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusText">Conectando...</span>
+        </div>
+        <button class="btn-settings" onclick="abrirModalConfig()" title="Configurações de Relay/Nuvem">
+          <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- CAMPO INTERATIVO DINÂMICO QUANDO OFFLINE (REQUISITO 2) -->
+    <div class="offline-card" id="offlineCard" style="display: none;">
+      <div class="offline-header">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+        <span>Projetor Offline ou Inacessível</span>
+      </div>
+      <p class="offline-desc">
+        O projetor não está respondendo. Digite o novo IP da rede local, Tailscale (100.x) ou endpoint atual para restabelecer a conexão:
+      </p>
+      <div class="offline-input-row">
+        <input type="text" class="offline-input" id="dynamicIpInput" placeholder="Ex: 192.168.253.112 ou 100.x.x.x">
+        <button class="btn-reconnect" id="btnDynamicReconnect" onclick="atualizarIpDinamico()">
+          <span>Reconectar</span>
+        </button>
       </div>
     </div>
 
@@ -569,7 +861,7 @@
       </button>
     </div>
 
-    <!-- Otimização / Limpar RAM -->
+    <!-- Otimização de RAM -->
     <div class="optimize-section">
       <button class="btn btn-optimize" onclick="enviarComando('otimizar', 'Otimização de RAM')">
         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
@@ -582,6 +874,29 @@
     </div>
   </div>
 
+  <!-- Modal de Configuração de API / Relay na Nuvem -->
+  <div class="modal-overlay" id="configModal">
+    <div class="modal-box">
+      <h2>Conexão Relay / Nuvem</h2>
+      <p>Configure a URL do servidor backend ou relay para conectar o Cloudflare Pages ao projetor:</p>
+      
+      <input type="text" class="modal-input" id="apiInput" placeholder="Ex: https://meu-app.onrender.com ou https://xxx.trycloudflare.com">
+
+      <div class="preset-chips">
+        <span class="chip" onclick="aplicarPreset('http://localhost:5050')">Localhost:5050</span>
+        <span class="chip" onclick="aplicarPreset('http://192.168.253.108:5050')">IP LAN :5050</span>
+        <span class="chip" onclick="aplicarPreset('')">Automático (Padrão)</span>
+      </div>
+
+      <div class="test-result" id="testResult"></div>
+
+      <div class="modal-actions">
+        <button class="btn-modal btn-test" onclick="testarConexaoApi()">Testar</button>
+        <button class="btn-modal btn-save" onclick="salvarConfigApi()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div class="toast" id="toast">
     <svg class="toast-icon" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
@@ -591,7 +906,203 @@
   <script>
     const toast = document.getElementById('toast');
     const toastMsg = document.getElementById('toastMsg');
+    const configModal = document.getElementById('configModal');
+    const apiInput = document.getElementById('apiInput');
+    const testResult = document.getElementById('testResult');
+    const offlineCard = document.getElementById('offlineCard');
+    const dynamicIpInput = document.getElementById('dynamicIpInput');
+    const btnDynamicReconnect = document.getElementById('btnDynamicReconnect');
     let toastTimer = null;
+    let socket = null;
+
+    // Recupera a URL base do backend/relay
+    function getApiBase() {
+      const saved = localStorage.getItem('projector_api_url');
+      if (saved && saved.trim() !== '') {
+        return saved.trim().replace(/\/+$/, '');
+      }
+      return '';
+    }
+
+    function construirUrl(endpoint) {
+      const base = getApiBase();
+      const limpo = endpoint.replace(/^\/+/, '');
+      return base ? `${base}/${limpo}` : `/${limpo}`;
+    }
+
+    // Inicialização do WebSocket (Socket.IO)
+    function initWebSocket() {
+      const base = getApiBase() || window.location.origin;
+      try {
+        if (typeof io !== 'undefined') {
+          socket = io(base, {
+            transports: ['websocket', 'polling'],
+            timeout: 6000,
+            reconnectionAttempts: 5
+          });
+
+          socket.on('connect', () => {
+            console.log('[WS] Conectado ao Relay WebSocket na nuvem.');
+            socket.emit('ping_status');
+          });
+
+          socket.on('status_update', (data) => {
+            handleStatusUpdate(data);
+          });
+
+          socket.on('command_response', (data) => {
+            if (data.status === 'success') {
+              showToast(data.message || 'Comando executado!');
+            } else {
+              showToast(data.message || 'Erro na execução.');
+            }
+          });
+
+          socket.on('disconnect', () => {
+            console.log('[WS] Desconectado do WebSocket.');
+          });
+        }
+      } catch (e) {
+        console.warn('[WS] WebSocket indisponível, utilizando fallback HTTP.', e);
+      }
+    }
+
+    // Atualização visual do status e controle do campo interativo quando Offline
+    function handleStatusUpdate(data) {
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      const appText = document.getElementById('currentAppText');
+      const ipDisplay = document.getElementById('targetIpDisplay');
+
+      if (data && data.ip) {
+        ipDisplay.innerText = data.ip;
+        if (!dynamicIpInput.value || dynamicIpInput.value === '192.168.253.112') {
+          dynamicIpInput.value = data.ip;
+        }
+      }
+
+      if (data && data.status === 'online') {
+        dot.className = 'status-dot online';
+        text.innerText = 'Online';
+        appText.innerText = data.current_app || 'Área Inicial';
+        // Quando Online, esconde o campo interativo de reconexão
+        offlineCard.style.display = 'none';
+      } else {
+        dot.className = 'status-dot offline';
+        text.innerText = 'Offline';
+        appText.innerText = 'Desconectado';
+        // Quando Offline, EXIBE IMEDIATAMENTE O CAMPO DE TEXTO INTERATIVO (Requisito 2)
+        offlineCard.style.display = 'flex';
+      }
+    }
+
+    // Ação do campo interativo quando Offline para atualizar o IP dinamicamente
+    async function atualizarIpDinamico() {
+      const newIp = dynamicIpInput.value.trim();
+      if (!newIp) {
+        showToast('Digite um endereço de IP válido!');
+        return;
+      }
+
+      vibrar();
+      btnDynamicReconnect.innerText = 'Conectando...';
+      btnDynamicReconnect.disabled = true;
+      showToast(`Tentando conectar ao IP ${newIp}...`);
+
+      try {
+        // Envia via WebSocket se ativo
+        if (socket && socket.connected) {
+          socket.emit('set_ip', { ip: newIp });
+        }
+
+        // Envia via REST API com fallback
+        const res = await fetch(construirUrl('api/config/ip'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: newIp })
+        });
+        const data = await res.json();
+        
+        if (data.details) {
+          handleStatusUpdate(data.details);
+        }
+
+        if (data.status === 'success') {
+          showToast(`Conectado ao projetor em ${newIp}!`);
+        } else {
+          showToast(data.message || `IP atualizado para ${newIp}.`);
+        }
+      } catch (err) {
+        showToast(`Erro ao enviar novo IP: ${err.message}`);
+      } finally {
+        btnDynamicReconnect.innerText = 'Reconectar';
+        btnDynamicReconnect.disabled = false;
+        setTimeout(checkStatus, 1500);
+      }
+    }
+
+    function abrirModalConfig() {
+      apiInput.value = localStorage.getItem('projector_api_url') || '';
+      testResult.className = 'test-result';
+      testResult.style.display = 'none';
+      configModal.classList.add('active');
+    }
+
+    function fecharModalConfig() {
+      configModal.classList.remove('active');
+    }
+
+    function aplicarPreset(val) {
+      apiInput.value = val;
+    }
+
+    async function testarConexaoApi() {
+      const url = (apiInput.value || '').trim().replace(/\/+$/, '');
+      const testUrl = url ? `${url}/status` : '/status';
+      testResult.style.display = 'block';
+      testResult.className = 'test-result';
+      testResult.innerText = 'Testando comunicação com o backend/relay...';
+
+      try {
+        const res = await fetch(testUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
+        const data = await res.json();
+        if (data.status === 'online') {
+          testResult.className = 'test-result success';
+          testResult.innerText = `🟢 Sucesso! Projetor online (Tela: ${data.current_app || 'Pronto'})`;
+        } else {
+          testResult.className = 'test-result error';
+          testResult.innerText = `🟡 Backend online, mas projetor desconectado (IP: ${data.ip || 'desconhecido'}).`;
+        }
+      } catch (e) {
+        testResult.className = 'test-result error';
+        if (window.location.protocol === 'https:' && url.startsWith('http://')) {
+          testResult.innerText = '🔴 Bloqueio Mixed-Content: Página HTTPS não pode chamar HTTP direto. Use Cloudflare Tunnel ou Render (HTTPS).';
+        } else {
+          testResult.innerText = `🔴 Falha na conexão: ${e.message}.`;
+        }
+      }
+    }
+
+    function salvarConfigApi() {
+      const val = apiInput.value.trim().replace(/\/+$/, '');
+      if (val) {
+        localStorage.setItem('projector_api_url', val);
+        showToast('URL da API salva com sucesso!');
+      } else {
+        localStorage.removeItem('projector_api_url');
+        showToast('Modo automático padrão ativado.');
+      }
+      fecharModalConfig();
+      if (socket) {
+        socket.disconnect();
+      }
+      initWebSocket();
+      checkStatus();
+    }
+
+    configModal.addEventListener('click', (e) => {
+      if (e.target === configModal) fecharModalConfig();
+    });
 
     function showToast(msg) {
       toastMsg.innerText = msg;
@@ -602,39 +1113,49 @@
       }, 1800);
     }
 
-    // Feedback tátil com vibração
     function vibrar() {
       if ('vibrate' in navigator) {
         navigator.vibrate(30);
       }
     }
 
-    // Inicialização de aplicativo no projetor
     async function iniciarApp(appKey, label) {
       vibrar();
       showToast(`Abrindo ${label}...`);
+
+      if (socket && socket.connected) {
+        socket.emit('send_app', { app: appKey });
+        return;
+      }
+
       try {
-        const response = await fetch(`/app/${appKey}`, {
+        const response = await fetch(construirUrl(`app/${appKey}`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         });
         const data = await response.json();
         if (data.status === 'success') {
           showToast(`Iniciado: ${label}`);
-          checkStatus();
+          setTimeout(checkStatus, 1000);
         } else {
           showToast(data.message || `Erro ao abrir ${label}`);
         }
       } catch (err) {
-        showToast(`Erro na requisição para ${label}`);
+        showToast(`Erro de conexão com o backend`);
       }
     }
 
-    // Enviar comandos de navegação/tecla
     async function enviarComando(cmd, label) {
       vibrar();
+
+      if (socket && socket.connected) {
+        socket.emit('send_command', { cmd: cmd });
+        showToast(label || `Comando ${cmd.toUpperCase()}`);
+        return;
+      }
+
       try {
-        const response = await fetch(`/${cmd}`, {
+        const response = await fetch(construirUrl(cmd), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         });
@@ -642,14 +1163,14 @@
         if (data.status === 'success') {
           showToast(label || data.message || `Comando ${cmd.toUpperCase()}`);
           if (cmd === 'home' || cmd === 'voltar') {
-            setTimeout(checkStatus, 500);
+            setTimeout(checkStatus, 600);
           }
         } else {
           showToast(data.message || `Erro no comando ${cmd}`);
         }
       } catch (err) {
         try {
-          const respFallback = await fetch(`/api/cmd/${cmd}`);
+          const respFallback = await fetch(construirUrl(`api/cmd/${cmd}`));
           const dataFallback = await respFallback.json();
           showToast(label || dataFallback.message);
         } catch (e) {
@@ -658,41 +1179,31 @@
       }
     }
 
-    // Checagem periódica de status e do app atual
     async function checkStatus() {
-      try {
-        const res = await fetch('/status');
-        const data = await res.json();
-        const dot = document.getElementById('statusDot');
-        const text = document.getElementById('statusText');
-        const appText = document.getElementById('currentAppText');
+      if (socket && socket.connected) {
+        socket.emit('ping_status');
+        return;
+      }
 
-        if (data.status === 'online') {
-          dot.classList.remove('offline');
-          text.innerText = 'Online';
-          if (data.current_app) {
-            appText.innerText = data.current_app;
-          }
-        } else {
-          dot.classList.add('offline');
-          text.innerText = 'Offline';
-          appText.innerText = 'Desconectado';
-        }
+      try {
+        const res = await fetch(construirUrl('status'));
+        const data = await res.json();
+        handleStatusUpdate(data);
       } catch (e) {
-        const dot = document.getElementById('statusDot');
-        const text = document.getElementById('statusText');
-        const appText = document.getElementById('currentAppText');
-        dot.classList.add('offline');
-        text.innerText = 'Offline';
-        appText.innerText = 'Servidor inacessível';
+        handleStatusUpdate({ status: 'offline', current_app: 'Servidor inacessível' });
       }
     }
 
+    // Inicialização
+    initWebSocket();
     checkStatus();
     setInterval(checkStatus, 5000);
 
     // Suporte aos atalhos de teclado
     window.addEventListener('keydown', (e) => {
+      if (configModal.classList.contains('active')) return;
+      if (document.activeElement === dynamicIpInput || document.activeElement === apiInput) return;
+
       switch (e.key) {
         case 'ArrowUp':
           e.preventDefault();

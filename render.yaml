@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: projector-adb-api
+    env: docker
+    dockerfilePath: Dockerfile
+    plan: free
+    region: ohio
+    envVars:
+      - key: PROJECTOR_IP
+        value: 192.168.253.112
+      - key: PROJECTOR_PORT
+        value: 5555
+      - key: CORS_ORIGINS
+        value: "*"

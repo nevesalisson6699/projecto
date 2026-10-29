@@ -1,34 +1,63 @@
 import os
 import shutil
 
-# Configurações de Rede do Projetor
-PROJECTOR_IP = os.environ.get("PROJECTOR_IP", "192.168.253.112")
+# Configurações de Rede do Projetor (Dinâmico: Suporta IP Local, Tailscale 100.x ou Nuvem)
+DEFAULT_PROJECTOR_IP = os.environ.get("PROJECTOR_IP", "192.168.253.112")
 PROJECTOR_PORT = int(os.environ.get("PROJECTOR_PORT", 5555))
-PROJECTOR_TARGET = f"{PROJECTOR_IP}:{PROJECTOR_PORT}"
 
-# Configurações do Servidor Web Flask
+# Estado mutável do IP em tempo de execução
+_current_ip = DEFAULT_PROJECTOR_IP
+
+def get_projector_ip() -> str:
+    global _current_ip
+    return _current_ip
+
+def set_projector_ip(new_ip: str) -> str:
+    global _current_ip
+    cleaned = new_ip.strip()
+    if ":" in cleaned:
+        # Se o usuário digitou ip:porta
+        cleaned = cleaned.split(":")[0]
+    _current_ip = cleaned
+    return _current_ip
+
+def get_projector_target() -> str:
+    return f"{get_projector_ip()}:{PROJECTOR_PORT}"
+
+# Configurações do Servidor Web Flask e WebSocket
 SERVER_HOST = os.environ.get("HOST", "0.0.0.0")
 SERVER_PORT = int(os.environ.get("PORT", 5050))
 DEBUG_MODE = os.environ.get("FLASK_DEBUG", "0").lower() in ("1", "true")
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
 
-# Auto-localização do Executável do ADB
+# Auto-localização do Executável do ADB (Multiplataforma: Windows e Linux/Container)
 def find_adb():
     adb_path = shutil.which("adb")
     if adb_path:
         return adb_path
 
-    candidatos = [
+    candidatos_windows = [
         r"C:\Users\alisson.sousa\Downloads\platform-tools-latest-windows\platform-tools\adb.exe",
         os.path.expandvars(r"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"),
         r"C:\platform-tools\adb.exe",
         os.path.expandvars(r"%USERPROFILE%\platform-tools\adb.exe"),
     ]
-    for p in candidatos:
+    for p in candidatos_windows:
         if os.path.exists(p):
             adb_dir = os.path.dirname(p)
             if adb_dir not in os.environ.get("PATH", ""):
                 os.environ["PATH"] = adb_dir + os.pathsep + os.environ.get("PATH", "")
             return p
+
+    candidatos_linux = [
+        "/usr/bin/adb",
+        "/usr/local/bin/adb",
+        "/opt/android-sdk/platform-tools/adb"
+    ]
+    for p in candidatos_linux:
+        if os.path.exists(p):
+            return p
+
     return "adb"
 
 ADB_BIN = find_adb()
@@ -100,4 +129,3 @@ APPS = {
         "color": "#0ea5e9"
     }
 }
-
