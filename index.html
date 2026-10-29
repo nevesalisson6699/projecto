@@ -1112,7 +1112,7 @@
     <div class="header">
       <div class="device-info">
         <h1>Controle Projetor</h1>
-        <p id="targetIpDisplay">{{ projector_ip|default('192.168.253.112') }}</p>
+        <p id="targetIpDisplay">192.168.253.112</p>
       </div>
       <div class="header-actions">
         <div class="status-badge" id="statusBadge">
@@ -1225,12 +1225,6 @@
       <button class="btn btn-optimize" onclick="enviarComando('otimizar', 'Otimização de RAM')">
         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
         <span>Otimizar Memória RAM (am kill-all)</span>
-      </button>
-
-      <!-- Alerta Visual no Projetor (Executado, acunha!) -->
-      <button class="btn btn-vol" style="margin-top: 10px; width: 100%; justify-content: center; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.08); color: var(--accent-blue);" onclick="dispararFeedbackVisual()">
-        <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-        <span>Feedback no Projetor: "Executado, acunha!"</span>
       </button>
     </div>
 
@@ -1620,7 +1614,7 @@
     }
 
     // Helper universal para requisições assíncronas com envio automático do IP via Header e Query
-    function apiFetch(endpoint, options = {}) {
+    async function apiFetch(endpoint, options = {}) {
       const url = construirUrl(endpoint);
       const opts = Object.assign({}, options);
       const headers = Object.assign({}, opts.headers || {});
@@ -1629,28 +1623,48 @@
         headers['X-Projector-IP'] = currentIp;
       }
       opts.headers = headers;
-      return fetch(url, opts);
+
+      // AbortController com timeout para evitar travamento da UI
+      const timeoutMs = opts.timeout || 6000;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      opts.signal = controller.signal;
+
+      try {
+        const res = await fetch(url, opts);
+        clearTimeout(timeoutId);
+        return res;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        throw err;
+      }
     }
 
-    // Inicializa o IP e URL salvos nos campos correspondentes
-    const savedIp = localStorage.getItem('projector_ip');
+    // Inicializa o IP e URL salvos nos campos correspondentes imediatamente
+    const targetDisplay = document.getElementById('targetIpDisplay');
+    const initialIp = getProjectorIp();
     const savedApiUrl = localStorage.getItem('projector_api_url');
-    if (savedIp) {
-      dynamicIpInput.value = savedIp;
-      document.getElementById('targetIpDisplay').innerText = savedIp;
-    } else if (savedApiUrl) {
-      dynamicIpInput.value = savedApiUrl;
-      document.getElementById('targetIpDisplay').innerText = savedApiUrl;
+    if (targetDisplay) {
+      targetDisplay.innerText = initialIp;
+    }
+    if (dynamicIpInput) {
+      dynamicIpInput.value = initialIp;
     }
 
     // Persistência instantânea do IP ao digitar no campo
-    dynamicIpInput.addEventListener('input', (e) => {
-      const val = e.target.value.trim();
-      if (val && !val.startsWith('http://') && !val.startsWith('https://')) {
-        localStorage.setItem('projector_ip', val);
-        document.getElementById('targetIpDisplay').innerText = val;
-      }
-    });
+    if (dynamicIpInput) {
+      dynamicIpInput.addEventListener('input', (e) => {
+        const val = e.target.value.trim();
+        if (val) {
+          if (!val.startsWith('http://') && !val.startsWith('https://')) {
+            localStorage.setItem('projector_ip', val);
+            if (targetDisplay) targetDisplay.innerText = val;
+          } else {
+            localStorage.setItem('projector_api_url', val);
+          }
+        }
+      });
+    }
 
     // Gerenciamento de Abas
     function trocarAba(abaId, btn) {
@@ -1824,13 +1838,17 @@
       }
 
       try {
-        await apiFetch('api/input/key', {
+        const res = await apiFetch('api/input/key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: key, ip: currentIp })
+          body: JSON.stringify({ key: key, ip: currentIp }),
+          timeout: 4000
         });
+        if (!res || !res.ok) {
+          showToast(`Falha na tecla: ${label}`);
+        }
       } catch (e) {
-        console.warn('Erro ao enviar tecla:', e);
+        showToast(`Erro de conexão`);
       }
     }
 
@@ -1840,7 +1858,7 @@
       const val = input.value;
       if (!val) return;
       vibrar();
-      showToast(`Enviado: ${val}`);
+      showToast(`Enviando: ${val}`);
       input.value = '';
       const currentIp = getProjectorIp();
 
@@ -1849,13 +1867,19 @@
       }
 
       try {
-        await apiFetch('api/input/text', {
+        const res = await apiFetch('api/input/text', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: val, ip: currentIp })
+          body: JSON.stringify({ text: val, ip: currentIp }),
+          timeout: 5000
         });
+        if (res && res.ok) {
+          showToast(`Texto digitado no projetor!`);
+        } else {
+          showToast(`Erro ao digitar texto`);
+        }
       } catch (e) {
-        console.warn('Erro ao enviar texto:', e);
+        showToast(`Falha na conexão ao enviar texto`);
       }
     }
 
@@ -2084,12 +2108,18 @@
         const res = await apiFetch(`app/${appKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ip: currentIp })
+          body: JSON.stringify({ ip: currentIp }),
+          timeout: 4500
         });
         if (res && res.ok) {
-          showToast(`Executado, acunha! (${label})`);
+          showToast(`Iniciando ${label}...`);
+        } else {
+          showToast(`Erro ao abrir ${label}`);
         }
-      } catch (e) {}
+      } catch (e) {
+        showToast(`Erro de conexão ao abrir ${label}`);
+        if (offlineCard) offlineCard.style.display = 'flex';
+      }
     }
 
     // Envio de Comandos Físicos do D-pad e Sistema Dinâmico
@@ -2104,12 +2134,20 @@
         const res = await apiFetch(cmd, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ip: currentIp })
+          body: JSON.stringify({ ip: currentIp }),
+          timeout: 4500
         });
-        if (res && res.ok && (cmd === 'otimizar' || cmd === 'limpar')) {
-          showToast('Executado, acunha!');
+        if (res && res.ok) {
+          if (cmd === 'otimizar' || cmd === 'limpar') {
+            showToast('Memória RAM otimizada!');
+          }
+        } else {
+          showToast(`Comando não executado: ${label || cmd}`);
         }
-      } catch (e) {}
+      } catch (e) {
+        showToast(`Sem resposta do projetor (${cmd})`);
+        if (offlineCard) offlineCard.style.display = 'flex';
+      }
     }
 
     // Disparo Manual do Feedback Visual no Projetor ("Executado, acunha!")
@@ -2136,7 +2174,7 @@
         socket.emit('ping_status', { ip: currentIp });
       }
       try {
-        const res = await apiFetch('status');
+        const res = await apiFetch('status', { timeout: 3500 });
         if (res.ok) {
           const data = await res.json();
           handleStatusUpdate(data);
