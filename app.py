@@ -22,7 +22,7 @@ from config import (
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# Habilita CORS completo em todas as rotas
+# Habilita CORS completo em todas as rotas (Cloudflare Pages, etc)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 # Servidor WebSocket em tempo real para comunicação com o front-end na nuvem
@@ -172,10 +172,7 @@ def send_text_to_projector(text: str) -> dict:
     if not text:
         return {"status": "error", "message": "Texto vazio."}
 
-    # Tratamento de espaços e caracteres especiais para o comando adb input text
-    # No Android input text, espaço é representado por %s
     escaped = text.replace(" ", "%s")
-    # Escapa caracteres que podem quebrar o shell
     escaped = re.sub(r'([\\`"\';|&<>$()])', r'\\\1', escaped)
 
     success, out = run_adb(["shell", "input", "text", escaped])
@@ -192,7 +189,6 @@ def send_key_char(char_or_code: str) -> dict:
     if not val:
         return {"status": "error", "message": "Caractere inválido."}
 
-    # Teclas de controle especiais
     special_keys = {
         "backspace": "67",  # KEYCODE_DEL
         "del": "67",
@@ -209,11 +205,9 @@ def send_key_char(char_or_code: str) -> dict:
         return {"status": "success" if success else "error", "key": low, "keycode": keycode}
 
     if val.isdigit() and len(val) > 1 and int(val) in range(1, 300):
-        # Keycode direto
         success, out = run_adb(["shell", "input", "keyevent", val])
         return {"status": "success" if success else "error", "keycode": val}
 
-    # Caractere alfanumérico ou pontuação
     if val == " ":
         success, out = run_adb(["shell", "input", "keyevent", "62"])
     else:
@@ -226,7 +220,6 @@ def send_key_char(char_or_code: str) -> dict:
 def handle_touchpad_motion(dx: float, dy: float) -> dict:
     """Atualiza a posição virtual do cursor no projetor."""
     global cursor_state
-    # Sensibilidade de movimento
     scale = 1.4
     new_x = max(0, min(1279, int(cursor_state["x"] + dx * scale)))
     new_y = max(0, min(719, int(cursor_state["y"] + dy * scale)))
@@ -250,10 +243,8 @@ def handle_touchpad_swipe(x1: int, y1: int, x2: int, y2: int, duration: int = 20
 def handle_touchpad_scroll(direction: str) -> dict:
     """Executa rolagem vertical (scroll up / scroll down)."""
     if direction == "down":
-        # Rola para baixo (arrasta o conteúdo para cima)
         return handle_touchpad_swipe(640, 520, 640, 200, 180)
     else:
-        # Rola para cima (arrasta o conteúdo para baixo)
         return handle_touchpad_swipe(640, 200, 640, 520, 180)
 
 # ----------------- EVENTOS WEBSOCKET (TEMPO REAL) -----------------
@@ -387,6 +378,14 @@ def route_input_key():
     return jsonify(send_key_char(char_or_code))
 
 # Rotas de Touchpad e Mouse
+@app.route("/api/touchpad/motion", methods=["POST", "OPTIONS"])
+def route_touchpad_motion():
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    data = request.get_json(silent=True) or request.form or {}
+    dx = float(data.get("dx", 0))
+    dy = float(data.get("dy", 0))
+    return jsonify(handle_touchpad_motion(dx, dy))
+
 @app.route("/api/touchpad/tap", methods=["POST", "OPTIONS"])
 def route_touchpad_tap():
     if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200

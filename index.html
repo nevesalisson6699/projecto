@@ -12,7 +12,7 @@
   <style>
     :root {
       --bg-dark: #070b14;
-      --card-bg: rgba(18, 24, 41, 0.85);
+      --card-bg: rgba(18, 24, 41, 0.88);
       --card-border: rgba(255, 255, 255, 0.08);
       --btn-bg: #1e293b;
       --btn-hover: #334155;
@@ -88,6 +88,7 @@
       color: var(--text-muted);
       margin-top: 2px;
       font-family: monospace;
+      word-break: break-all;
     }
 
     .header-actions {
@@ -152,10 +153,10 @@
       fill: currentColor;
     }
 
-    /* CARD INTERATIVO DE GERENCIAMENTO DINÂMICO DE IP QUANDO OFFLINE (REQUISITO 1) */
+    /* CARD INTERATIVO DE GERENCIAMENTO DINÂMICO DE IP & ENDPOINT (REQUISITO 1 & 2) */
     .offline-card {
-      background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(245, 158, 11, 0.08));
-      border: 1px solid rgba(239, 68, 68, 0.35);
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.14), rgba(245, 158, 11, 0.1));
+      border: 1px solid rgba(239, 68, 68, 0.4);
       border-radius: 20px;
       padding: 14px;
       display: flex;
@@ -181,7 +182,7 @@
     .offline-desc {
       font-size: 0.72rem;
       color: #cbd5e1;
-      line-height: 1.35;
+      line-height: 1.4;
     }
 
     .offline-input-row {
@@ -193,7 +194,7 @@
       flex: 1;
       padding: 10px 12px;
       border-radius: 12px;
-      background: rgba(15, 23, 42, 0.85);
+      background: rgba(15, 23, 42, 0.9);
       border: 1px solid rgba(255, 255, 255, 0.15);
       color: #fff;
       font-size: 0.8rem;
@@ -227,7 +228,12 @@
       box-shadow: 0 0 12px var(--accent-blue-glow);
     }
 
-    /* BARRA DE NAVEGAÇÃO POR ABAS (TABS) - REQUISITO 4 */
+    .btn-reconnect:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    /* BARRA DE NAVEGAÇÃO POR ABAS */
     .tabs-nav {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -465,11 +471,11 @@
       text-align: center;
     }
 
-    /* ABA 3: MODO TOUCHPAD AVANÇADO (REQUISITO 3) */
+    /* ABA 3: MODO TOUCHPAD AVANÇADO */
     .touchpad-surface {
       width: 100%;
       height: 250px;
-      background: radial-gradient(circle at 50% 50%, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%);
+      background: radial-gradient(circle at 50% 50%, rgba(30, 41, 59, 0.85) 0%, rgba(15, 23, 42, 0.98) 100%);
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 22px;
       position: relative;
@@ -483,13 +489,15 @@
     }
 
     .touchpad-hint {
-      color: rgba(255, 255, 255, 0.25);
+      color: rgba(255, 255, 255, 0.28);
       font-size: 0.75rem;
       pointer-events: none;
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 6px;
+      text-align: center;
+      padding: 0 10px;
     }
 
     .touchpad-hint svg {
@@ -522,7 +530,7 @@
       gap: 10px;
     }
 
-    /* ABA 4: TECLADO VIRTUAL INTELIGENTE (REQUISITO 2) */
+    /* ABA 4: TECLADO VIRTUAL INTELIGENTE */
     .text-input-group {
       display: flex;
       gap: 8px;
@@ -553,6 +561,11 @@
       font-weight: 700;
       font-size: 0.8rem;
       cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-send-text:hover {
+      box-shadow: 0 0 12px var(--accent-blue-glow);
     }
 
     .keyboard-mode-selector {
@@ -574,6 +587,7 @@
       font-size: 0.72rem;
       font-weight: 700;
       cursor: pointer;
+      transition: all 0.2s ease;
     }
 
     .kb-mode-btn.active {
@@ -630,7 +644,7 @@
       font-size: 0.74rem;
     }
 
-    /* Modal de Configuração de API */
+    /* Modal de Configuração de API / Relay na Nuvem */
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -686,6 +700,10 @@
       font-size: 0.82rem;
       font-family: monospace;
       outline: none;
+    }
+
+    .modal-input:focus {
+      border-color: var(--accent-blue);
     }
 
     .modal-actions {
@@ -753,24 +771,24 @@
       </div>
     </div>
 
-    <!-- CAMPO INTERATIVO DE GERENCIAMENTO DINÂMICO DE IP QUANDO OFFLINE (REQUISITO 1) -->
+    <!-- CAMPO INTERATIVO DE GERENCIAMENTO DINÂMICO DE IP QUANDO OFFLINE -->
     <div class="offline-card" id="offlineCard" style="display: none;">
       <div class="offline-title">
         <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
         <span>Projetor Offline / Desconectado</span>
       </div>
       <p class="offline-desc">
-        Insira o IP local, IP Tailscale (100.x) ou Endpoint de conexão para restabelecer o controle:
+        Insira o IP local (ex: <code>192.168.253.112</code>), IP Tailscale ou Endpoint de conexão (ex: <code>https://sua-api.onrender.com</code>):
       </p>
       <div class="offline-input-row">
-        <input type="text" class="offline-input" id="dynamicIpInput" placeholder="Ex: 192.168.253.112 ou 100.x.x.x">
+        <input type="text" class="offline-input" id="dynamicIpInput" placeholder="Ex: 192.168.253.112 ou https://sua-api.onrender.com">
         <button class="btn-reconnect" id="btnDynamicReconnect" onclick="atualizarIpDinamico()">
           <span>Reconectar</span>
         </button>
       </div>
     </div>
 
-    <!-- NAVEGAÇÃO POR ABAS (REQUISITO 4) -->
+    <!-- NAVEGAÇÃO POR ABAS -->
     <div class="tabs-nav">
       <button class="tab-btn active" onclick="trocarAba('controle', this)">
         <svg viewBox="0 0 24 24"><path d="M17 1H7c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-2-2-2zm0 18H7V5h10v14z"/></svg>
@@ -906,7 +924,7 @@
       </div>
     </div>
 
-    <!-- CONTEÚDO ABA 3: TOUCHPAD AVANÇADO (REQUISITO 3) -->
+    <!-- CONTEÚDO ABA 3: TOUCHPAD AVANÇADO -->
     <div class="tab-content" id="tab-touchpad">
       <div class="touchpad-surface" id="touchpadSurface">
         <div class="touchpad-hint">
@@ -938,7 +956,7 @@
       </div>
     </div>
 
-    <!-- CONTEÚDO ABA 4: TECLADO VIRTUAL INTELIGENTE (REQUISITO 2) -->
+    <!-- CONTEÚDO ABA 4: TECLADO VIRTUAL INTELIGENTE -->
     <div class="tab-content" id="tab-teclado">
       <!-- Envio de Texto Completo -->
       <div class="text-input-group">
@@ -952,7 +970,7 @@
         <button class="kb-mode-btn" id="btnKbNumbers" onclick="mudarLayoutTeclado('numbers')">123 (Números & PIN)</button>
       </div>
 
-      <!-- Grade do Teclado Virtual -->
+      <!-- Grade do Teclado Virtual QWERTY -->
       <div class="keyboard-container" id="kbLettersGrid">
         <div class="kb-row">
           <div class="kb-key" onclick="digitarTecla('q')">Q</div>
@@ -1047,10 +1065,17 @@
     let toastTimer = null;
     let socket = null;
 
-    // Recupera configurações salvas
+    // Recupera a base de URL da API salva ou determina dinamicamente
     function getApiBase() {
       const saved = localStorage.getItem('projector_api_url');
-      return (saved && saved.trim()) ? saved.trim().replace(/\/+$/, '') : '';
+      if (saved && saved.trim()) {
+        return saved.trim().replace(/\/+$/, '');
+      }
+      // Se não houver URL salva e estivermos em localhost ou porta 5050
+      if (window.location.port === '5050' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return window.location.origin;
+      }
+      return '';
     }
 
     function construirUrl(endpoint) {
@@ -1059,23 +1084,28 @@
       return base ? `${base}/${limpo}` : `/${limpo}`;
     }
 
-    // Inicializa o IP do campo com o localStorage se existir
+    // Inicializa o IP e URL salvos nos campos correspondentes
     const savedIp = localStorage.getItem('projector_ip');
+    const savedApiUrl = localStorage.getItem('projector_api_url');
     if (savedIp) {
       dynamicIpInput.value = savedIp;
       document.getElementById('targetIpDisplay').innerText = savedIp;
+    } else if (savedApiUrl) {
+      dynamicIpInput.value = savedApiUrl;
+      document.getElementById('targetIpDisplay').innerText = savedApiUrl;
     }
 
-    // Gerenciamento de Abas (Requisito 4)
+    // Gerenciamento de Abas
     function trocarAba(abaId, btn) {
       vibrar();
       document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-      document.getElementById(`tab-${abaId}`).classList.add('active');
-      btn.classList.add('active');
+      const targetTab = document.getElementById(`tab-${abaId}`);
+      if (targetTab) targetTab.classList.add('active');
+      if (btn) btn.classList.add('active');
     }
 
-    // Alternador de Teclado (Requisito 2)
+    // Alternador de Teclado (QWERTY vs 123)
     function mudarLayoutTeclado(modo) {
       vibrar();
       const letGrid = document.getElementById('kbLettersGrid');
@@ -1101,10 +1131,14 @@
       const base = getApiBase() || window.location.origin;
       try {
         if (typeof io !== 'undefined') {
+          if (socket) {
+            try { socket.disconnect(); } catch (err) {}
+          }
+
           socket = io(base, {
             transports: ['websocket', 'polling'],
             timeout: 6000,
-            reconnectionAttempts: 5
+            reconnectionAttempts: 4
           });
 
           socket.on('connect', () => {
@@ -1147,88 +1181,190 @@
       }
     }
 
-    // Atualização Dinâmica do IP com Persistência em localStorage (Requisito 1)
+    // Atualização Dinâmica do IP / Endpoint com Salvamento no localStorage
     async function atualizarIpDinamico() {
-      const newIp = dynamicIpInput.value.trim();
-      if (!newIp) {
-        showToast('Digite um IP válido!');
+      const inputVal = dynamicIpInput.value.trim();
+      if (!inputVal) {
+        showToast('Digite um IP ou Endpoint válido!');
         return;
       }
 
       vibrar();
-      localStorage.setItem('projector_ip', newIp);
-      document.getElementById('targetIpDisplay').innerText = newIp;
       btnDynamicReconnect.innerText = 'Conectando...';
       btnDynamicReconnect.disabled = true;
-      showToast(`Conectando em ${newIp}...`);
 
-      if (socket && socket.connected) {
-        socket.emit('set_ip', { ip: newIp });
+      let targetApiUrl = null;
+      let targetIp = null;
+
+      // Detecta se é uma URL completa ou endpoint
+      if (inputVal.startsWith('http://') || inputVal.startsWith('https://')) {
+        targetApiUrl = inputVal.replace(/\/+$/, '');
+        const matchIp = inputVal.match(/https?:\/\/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
+        if (matchIp) targetIp = matchIp[1];
+      } else if (inputVal.includes('.onrender.com') || inputVal.includes('.trycloudflare.com') || inputVal.includes('.railway.app') || inputVal.includes('.ngrok')) {
+        targetApiUrl = `https://${inputVal.replace(/\/+$/, '')}`;
+      } else if (inputVal.includes(':5050') || inputVal.includes(':5000')) {
+        targetApiUrl = `http://${inputVal.replace(/\/+$/, '')}`;
+        const matchIp = inputVal.match(/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
+        if (matchIp) targetIp = matchIp[1];
+      } else {
+        // Trata como endereço IP puro do projetor (ex: 192.168.253.112 ou 100.x.x.x)
+        targetIp = inputVal;
+        if (!getApiBase()) {
+          targetApiUrl = `http://${inputVal}:5050`;
+        }
       }
 
+      if (targetApiUrl) {
+        localStorage.setItem('projector_api_url', targetApiUrl);
+      }
+      if (targetIp) {
+        localStorage.setItem('projector_ip', targetIp);
+        document.getElementById('targetIpDisplay').innerText = targetIp;
+      } else {
+        document.getElementById('targetIpDisplay').innerText = targetApiUrl || inputVal;
+      }
+
+      showToast(`Atualizando endpoint...`);
+
+      // Reinicia WebSocket com o novo endpoint instantaneamente
+      initWebSocket();
+
+      // Envia requisição assíncrona fetch para configurar o IP no backend
       try {
+        const payload = targetIp ? { ip: targetIp } : { ip: inputVal };
         const res = await fetch(construirUrl('api/config/ip'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ip: newIp })
+          body: JSON.stringify(payload)
         });
         const data = await res.json();
         if (data.details) handleStatusUpdate(data.details);
-        showToast(data.message || `IP atualizado!`);
+        showToast(data.message || 'Endpoint atualizado!');
       } catch (err) {
-        showToast(`Erro ao atualizar IP`);
+        // Fallback: tenta consultar o status diretamente
+        try {
+          const stRes = await fetch(construirUrl('status'));
+          const stData = await stRes.json();
+          handleStatusUpdate(stData);
+          showToast(`Conectado ao servidor!`);
+        } catch (stErr) {
+          showToast(`Endpoint salvo! Verificando status...`);
+        }
       } finally {
         btnDynamicReconnect.innerText = 'Reconectar';
         btnDynamicReconnect.disabled = false;
-        setTimeout(checkStatus, 1500);
+        setTimeout(checkStatus, 1000);
       }
     }
 
-    // Teclado Virtual: Digitar Tecla Individual (Requisito 2)
-    function digitarTecla(key) {
+    // Teclado Virtual: Envio de Tecla Individual Assíncrono (fetch + socket)
+    async function digitarTecla(key) {
       vibrar();
+      const label = key === ' ' ? 'Espaço' : (key === 'backspace' ? 'Apagar' : (key === 'enter' ? 'Ir' : key));
+      showToast(`Tecla: ${label}`);
+
       if (socket && socket.connected) {
         socket.emit('input_key', { key: key });
-      } else {
-        fetch(construirUrl('api/input/key'), {
+      }
+
+      // Dispara fetch assíncrono para a API
+      try {
+        await fetch(construirUrl('api/input/key'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ key: key })
         });
+      } catch (e) {
+        console.warn('Erro ao enviar tecla via fetch:', e);
       }
-      showToast(`Tecla: ${key === ' ' ? 'Espaço' : key}`);
     }
 
-    // Enviar Texto Completo
-    function enviarTextoCompleto() {
+    // Teclado Virtual: Envio de Texto Completo Assíncrono (fetch + socket)
+    async function enviarTextoCompleto() {
       const input = document.getElementById('fullTextInput');
       const val = input.value;
       if (!val) return;
       vibrar();
+      showToast(`Enviado: ${val}`);
+      input.value = '';
 
       if (socket && socket.connected) {
         socket.emit('input_text', { text: val });
-      } else {
-        fetch(construirUrl('api/input/text'), {
+      }
+
+      // Dispara fetch assíncrono para a API
+      try {
+        await fetch(construirUrl('api/input/text'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: val })
         });
+      } catch (e) {
+        console.warn('Erro ao enviar texto via fetch:', e);
       }
-      showToast(`Enviado: ${val}`);
-      input.value = '';
     }
 
-    // MODO TOUCHPAD INTERATIVO (REQUISITO 3)
+    // Intercepta Enter no campo de texto para envio rápido
+    document.getElementById('fullTextInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        enviarTextoCompleto();
+      }
+    });
+
+    // Intercepta Enter no campo de reconexão de IP
+    document.getElementById('dynamicIpInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        atualizarIpDinamico();
+      }
+    });
+
+    // MODO TOUCHPAD AVANÇADO (GESTOS, TOQUE E CLIQUE VIA FETCH + SOCKET)
     const touchpad = document.getElementById('touchpadSurface');
-    let lastX = 0, lastY = 0, isTouching = false, touchStartTime = 0;
+    let lastX = 0, lastY = 0, startX = 0, startY = 0, isTouching = false, touchStartTime = 0;
+    let motionTimer = null;
+    let accDx = 0, accDy = 0;
+
+    // Dispara movimento de cursor throttled (~35ms) para garantir alta fluidez via fetch e socket
+    function dispatchTouchpadMotion(dx, dy) {
+      accDx += dx;
+      accDy += dy;
+
+      if (socket && socket.connected) {
+        socket.emit('touchpad_motion', { dx: dx, dy: dy });
+      }
+
+      if (!motionTimer) {
+        motionTimer = setTimeout(() => {
+          const sendDx = accDx;
+          const sendDy = accDy;
+          accDx = 0;
+          accDy = 0;
+          motionTimer = null;
+
+          if (Math.abs(sendDx) > 0.5 || Math.abs(sendDy) > 0.5) {
+            fetch(construirUrl('api/touchpad/motion'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ dx: sendDx, dy: sendDy })
+            }).catch(() => {});
+          }
+        }, 35);
+      }
+    }
 
     touchpad.addEventListener('pointerdown', (e) => {
       isTouching = true;
       lastX = e.clientX;
       lastY = e.clientY;
+      startX = e.clientX;
+      startY = e.clientY;
       touchStartTime = Date.now();
-      touchpad.setPointerCapture(e.pointerId);
+      try {
+        touchpad.setPointerCapture(e.pointerId);
+      } catch (err) {}
     });
 
     touchpad.addEventListener('pointermove', (e) => {
@@ -1238,10 +1374,8 @@
       lastX = e.clientX;
       lastY = e.clientY;
 
-      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
-        if (socket && socket.connected) {
-          socket.emit('touchpad_motion', { dx: dx, dy: dy });
-        }
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+        dispatchTouchpadMotion(dx, dy);
       }
     });
 
@@ -1249,75 +1383,105 @@
       if (!isTouching) return;
       isTouching = false;
       const duration = Date.now() - touchStartTime;
-      // Clique seco se o toque foi rápido (< 250ms)
-      if (duration < 250) {
-        enviarCliqueTouchpad('left');
+      const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
+      // Toque seco rápido (< 280ms) e sem deslocamento considerável (< 12px) = Clique/Tap
+      if (duration < 280 && dist < 12) {
+        enviarTapTouchpad();
       }
     });
 
-    function enviarCliqueTouchpad(button) {
+    touchpad.addEventListener('pointercancel', () => {
+      isTouching = false;
+    });
+
+    async function enviarTapTouchpad() {
       vibrar();
+      showToast('Toque / Clique');
+      if (socket && socket.connected) {
+        socket.emit('touchpad_tap', {});
+      }
+      try {
+        await fetch(construirUrl('api/touchpad/tap'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+      } catch (e) {}
+    }
+
+    async function enviarCliqueTouchpad(button) {
+      vibrar();
+      showToast(button === 'left' ? 'Clique Esquerdo' : 'Voltar');
       if (socket && socket.connected) {
         socket.emit('touchpad_click', { button: button });
-      } else {
-        fetch(construirUrl('api/touchpad/click'), {
+      }
+      try {
+        await fetch(construirUrl('api/touchpad/click'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ button: button })
         });
-      }
-      showToast(button === 'left' ? 'Toque / Clique' : 'Voltar');
+      } catch (e) {}
     }
 
-    function enviarScrollTouchpad(direction) {
+    async function enviarScrollTouchpad(direction) {
       vibrar();
+      showToast(direction === 'up' ? 'Rolar Cima' : 'Rolar Baixo');
       if (socket && socket.connected) {
         socket.emit('touchpad_scroll', { direction: direction });
-      } else {
-        fetch(construirUrl('api/touchpad/scroll'), {
+      }
+      try {
+        await fetch(construirUrl('api/touchpad/scroll'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ direction: direction })
         });
-      }
-      showToast(direction === 'up' ? 'Rolar Cima' : 'Rolar Baixo');
+      } catch (e) {}
     }
 
-    // Funções Gerais
+    // Inicialização de Aplicativos
     async function iniciarApp(appKey, label) {
       vibrar();
       showToast(`Abrindo ${label}...`);
       if (socket && socket.connected) {
         socket.emit('send_app', { app: appKey });
-      } else {
-        fetch(construirUrl(`app/${appKey}`), { method: 'POST' });
       }
+      try {
+        await fetch(construirUrl(`app/${appKey}`), { method: 'POST' });
+      } catch (e) {}
     }
 
+    // Envio de Comandos Físicos do D-pad e Sistema
     async function enviarComando(cmd, label) {
       vibrar();
+      showToast(label || cmd.toUpperCase());
       if (socket && socket.connected) {
         socket.emit('send_command', { cmd: cmd });
-      } else {
-        fetch(construirUrl(cmd), { method: 'POST' });
       }
-      showToast(label || cmd.toUpperCase());
+      try {
+        await fetch(construirUrl(cmd), { method: 'POST' });
+      } catch (e) {}
     }
 
+    // Verificação de Status Periódica
     async function checkStatus() {
       if (socket && socket.connected) {
         socket.emit('ping_status');
-        return;
       }
       try {
         const res = await fetch(construirUrl('status'));
-        const data = await res.json();
-        handleStatusUpdate(data);
+        if (res.ok) {
+          const data = await res.json();
+          handleStatusUpdate(data);
+        } else {
+          handleStatusUpdate({ status: 'offline' });
+        }
       } catch (e) {
         handleStatusUpdate({ status: 'offline' });
       }
     }
 
+    // Feedback Visual e Tátil
     function showToast(msg) {
       toast.innerText = msg;
       toast.classList.add('show');
@@ -1329,6 +1493,7 @@
       if ('vibrate' in navigator) navigator.vibrate(25);
     }
 
+    // Modal de Configurações
     function abrirModalConfig() {
       apiInput.value = localStorage.getItem('projector_api_url') || '';
       configModal.classList.add('active');
@@ -1338,15 +1503,37 @@
       configModal.classList.remove('active');
     }
 
+    async function testarConexaoApi() {
+      const val = (apiInput.value || '').trim().replace(/\/+$/, '');
+      if (!val) {
+        showToast('Informe uma URL de API');
+        return;
+      }
+      showToast('Testando conexão...');
+      try {
+        const testUrl = `${val}/status`;
+        const res = await fetch(testUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
+        if (res.ok) {
+          const data = await res.json();
+          showToast(`Conectado! Status: ${data.status.toUpperCase()}`);
+        } else {
+          showToast(`Erro na resposta: HTTP ${res.status}`);
+        }
+      } catch (err) {
+        showToast('Falha ao conectar na URL informada');
+      }
+    }
+
     function salvarConfigApi() {
       const val = apiInput.value.trim().replace(/\/+$/, '');
       if (val) {
         localStorage.setItem('projector_api_url', val);
+        showToast('URL da API salva com sucesso!');
       } else {
         localStorage.removeItem('projector_api_url');
+        showToast('Configuração resetada para padrão.');
       }
       fecharModalConfig();
-      if (socket) socket.disconnect();
       initWebSocket();
       checkStatus();
     }
