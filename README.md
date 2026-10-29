@@ -1,106 +1,74 @@
 # 📽️ Painel de Controle Inteligente do Projetor (Android ADB)
 
-Painel web moderno, responsivo e com suporte a arquitetura híbrida (Cloudflare Pages + Backend Flask + ADB local ou remoto via Tailscale / Render).
+Painel web moderno, responsivo e com suporte a arquitetura híbrida (Cloudflare Pages + Backend Flask + WebSocket em Tempo Real + Touchpad + Teclado Virtual Inteligente).
 
 ---
 
-## 🏗️ Arquitetura de Nuvem e Acesso Remoto
+## ✨ Recursos Avançados
 
-Quando hospedado em serviços estáticos na nuvem (como o **Cloudflare Pages**), o front-end HTML/JS não possui acesso direto à sua rede local privada (`192.168.253.112`) nem executa Python. Para resolver isso, o projeto suporta duas soluções integradas:
+1. **Arquitetura 100% em Nuvem & Acesso Universal**:
+   - Front-end estático otimizado para o **Cloudflare Pages** (`https://projecto.pages.dev`).
+   - Funciona em qualquer navegador, seja no Wi-Fi, 4G ou 5G.
+   - Detecção dinâmica de status *Online/Offline*.
+   - **Gerenciamento Dinâmico de IP**: Quando desconectado, exibe um painel interativo para atualizar o IP local, IP Tailscale (`100.x.x.x`) ou URL de túnel com salvamento automático no `localStorage`.
 
-```
-┌─────────────────────────────────┐
-│     Cloudflare Pages (HTTPS)     │
-│   (https://projecto.pages.dev)  │
-└────────────────┬────────────────┘
-                 │ fetch() com CORS liberado
-                 ▼
-┌────────────────────────────────────────────────────────┐
-│ OPÇÃO 1: Cloudflare Tunnel / Ngrok / Render (HTTPS)    │
-│ OPÇÃO 2: Tailscale Mesh VPN (IP 100.x.x.x:5050)         │
-└────────────────┬───────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────┐
-│     Backend Flask (app.py)      │
-│  (No seu PC ou Render Docker)   │
-└────────────────┬────────────────┘
-                 │ adb connect
-                 ▼
-┌─────────────────────────────────┐
-│     Projetor Android (ADB)      │
-│  (192.168.253.112 ou Tailscale) │
-└─────────────────────────────────┘
-```
+2. **Teclado Virtual Inteligente (QWERTY & Numérico)**:
+   - Alternância entre layout **QWERTY (Letras)** e **123 (Numérico / PIN)**.
+   - Digitação em tempo real no campo focado da tela do projetor.
+   - Barra de envio de textos completos ou links via `adb input text`.
+   - Teclas de controle dedicadas: Backspace (⌫), Espaço (␣) e Ir / Enter (⏎).
+
+3. **Modo Touchpad Avançado (Mouse / Cursor)**:
+   - Superfície tátil sensível ao toque para arrastar o cursor livremente na tela (1280x720).
+   - Suporte a toques secos (clique esquerdo) e gestos de arraste (*swipe*).
+   - Botões físicos virtuais: Clique Esquerdo, Botão Voltar (Cancelar) e Rolagem vertical (Scroll Cima / Scroll Baixo).
+
+4. **Navegação por Abas (Mobile First)**:
+   - 📱 **Controle**: D-pad ergonômico, botões de sistema (Power, Mute, Menu, Voltar, Home), volume e otimização de RAM (`am kill-all`).
+   - 📺 **Apps**: Abertura em 1 clique dos apps (YouTube, Netflix, Prime Video, YouCine, Chrome, UniTV, Ajustes e Início).
+   - 🖱️ **Touchpad**: Modo mouse completo.
+   - ⌨️ **Teclado**: Digitação inteligente.
+   - Efeito visual ripple e vibração tátil leve (`navigator.vibrate(25)`).
 
 ---
 
-### Solução A: Cloudflare Pages + Cloudflare Tunnel (Recomendado & Gratuito)
-Esta opção mantém o backend rodando no seu computador (com acesso direto ao ADB do projetor) e gera uma URL pública HTTPS criptografada:
-
-1. Inicie o servidor local: Dê dois cliques em `iniciar_painel.bat`.
-2. Em outro terminal, execute `iniciar_tunnel_cloudflare.bat` (ou execute `npx cloudflared tunnel --url http://localhost:5050`).
-3. O Cloudflare gerará uma URL HTTPS temporária gratuita (ex: `https://palavra-aleatoria.trycloudflare.com`).
-4. Abra seu painel no **Cloudflare Pages**, clique no ícone de engrenagem ⚙️ no canto superior direito, cole a URL gerada e clique em **Salvar**.
-5. O painel ficará imediatamente **Online** de qualquer lugar do mundo!
-
----
-
-### Solução B: Rede Mesh com Tailscale (IPs 100.x.x.x)
-Se você utiliza **Tailscale**:
-
-1. Adicione seu computador e/ou o projetor à sua rede Tailscale.
-2. Defina a variável `PROJECTOR_IP` no `.env` com o IP do Tailscale (ex: `PROJECTOR_IP=100.85.120.45`).
-3. Acesse o painel pelo seu celular no mesmo Tailnet apontando a API para `http://100.x.x.x:5050`.
-
----
-
-### Solução C: Deploy do Backend no Render / Railway (Docker com ADB)
-O repositório já inclui `Dockerfile`, `render.yaml` e `railway.json`:
-
-1. No painel do **Render** (render.com) ou **Railway** (railway.app), crie um novo **Web Service** conectado a este repositório no GitHub.
-2. O serviço detectará automaticamente o `Dockerfile`, instalando o Python, Flask e as ferramentas oficiais do Android ADB (`android-tools-adb`).
-3. Nas variáveis de ambiente do serviço, configure:
-   - `PROJECTOR_IP`: IP público, Tailscale ou rota VPN do projetor.
-   - `PORT`: `5050`
-4. Use a URL HTTPS gerada (ex: `https://projector-api.onrender.com`) no botão ⚙️ do Cloudflare Pages.
-
----
-
-## 📁 Estrutura do Projeto
+## 📁 Estrutura de Arquivos
 
 ```text
 projetor/
 ├── config.py                 # Configurações de rede, portas e catálogo de apps
-├── app.py                    # API Flask com suporte completo a CORS
+├── app.py                    # API Flask + WebSocket (Socket.IO) com suporte a CORS
+├── bridge_agent.py           # Agente local de ponte para servidores na nuvem
 ├── index.html                # Ponto de entrada estático para o Cloudflare Pages
 ├── public/
 │   └── index.html            # Cópia estática para diretório de build
 ├── templates/
-│   └── index.html            # Template servido pelo Flask local
+│   └── index.html            # Template com Abas, D-pad, Touchpad e Teclado
 ├── Dockerfile                # Imagem Docker com Python 3.11 + ADB nativo
-├── render.yaml               # Arquivo de infraestrutura como código para Render
-├── railway.json              # Configuração para deploy no Railway
+├── render.yaml               # Infraestrutura como código para o Render
+├── railway.json              # Configuração para o Railway
 ├── Procfile                  # Entrada Gunicorn para PaaS
-├── requirements.txt          # flask, flask-cors, gunicorn
+├── requirements.txt          # flask, flask-cors, flask-socketio, gunicorn
 ├── iniciar_painel.bat         # Inicializador local (Windows)
-├── iniciar_tunnel_cloudflare.bat # Túnel HTTPS gratuito com Cloudflare Tunnel
+├── iniciar_tunnel_cloudflare.bat # Túnel HTTPS gratuito via Cloudflare
 └── README.md                 # Esta documentação
 ```
 
 ---
 
-## 📡 Rotas da API (com CORS Ativo)
+## 📡 Rotas da API e WebSocket
 
-| Rota | Método | Descrição |
+| Rota / Evento | Método | Descrição |
 | :--- | :--- | :--- |
-| `/status` | `GET` | Retorna status online/offline, IP e tela atual |
-| `/app/<app_name>` | `POST/GET` | Dispara a abertura de apps no projetor |
-| `/api/apps` | `GET` | Lista todos os apps cadastrados |
-| `/home` | `POST/GET` | Retorna para a tela inicial (`KEYCODE_HOME`) |
-| `/voltar` | `POST/GET` | Retorna à tela anterior (`KEYCODE_BACK`) |
-| `/cima`, `/baixo`, `/esquerda`, `/direita` | `POST/GET` | Navegação direcional do D-pad |
-| `/ok` | `POST/GET` | Confirmação (`KEYCODE_DPAD_CENTER`) |
-| `/vol_up`, `/vol_down`, `/mute` | `POST/GET` | Controles de áudio |
-| `/power` | `POST/GET` | Desliga / suspende a tela |
-| `/otimizar` | `POST/GET` | Limpeza de processos de segundo plano (`am kill-all`) |
+| `/status` | `GET` | Retorna status online/offline, IP, app e coordenadas do cursor |
+| `/api/config/ip` | `POST` | Atualiza o IP alvo do projetor em tempo de execução |
+| `/api/input/text` | `POST` | Digita texto completo no campo ativo |
+| `/api/input/key` | `POST` | Dispara tecla ou caractere do teclado virtual |
+| `/api/touchpad/tap` | `POST` | Executa toque na tela nas coordenadas especificadas |
+| `/api/touchpad/swipe`| `POST` | Executa gesto de arraste (swipe) na tela |
+| `/api/touchpad/scroll`| `POST` | Executa rolagem vertical (up / down) |
+| `/api/touchpad/click`| `POST` | Executa clique esquerdo ou direito |
+| `/app/<app_name>` | `POST/GET` | Dispara a inicialização de aplicativos |
+| `/otimizar` | `POST/GET` | Executa `am kill-all` para liberar memória RAM |
+| `WS send_command` | Socket.IO | Envia comando de navegação em tempo real |
+| `WS touchpad_motion`| Socket.IO | Movimentação do ponteiro em tempo real |

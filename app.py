@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import socket
 import threading
@@ -26,6 +27,9 @@ CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 # Servidor WebSocket em tempo real para comunicação com o front-end na nuvem
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+# Posição virtual do cursor (Resolução nativa 1280x720)
+cursor_state = {"x": 640, "y": 360}
 
 @app.after_request
 def add_cors_headers(response):
@@ -100,6 +104,7 @@ def get_projector_status() -> dict:
         "ip": ip,
         "target": target,
         "current_app": current_app,
+        "cursor": cursor_state,
         "details": state_out if is_online else "Não conectado"
     }
 
@@ -162,11 +167,99 @@ def launch_app(app_key_or_package: str) -> dict:
         "raw": out
     }
 
+def send_text_to_projector(text: str) -> dict:
+    """Envia texto completo para digitação no campo ativo do Android."""
+    if not text:
+        return {"status": "error", "message": "Texto vazio."}
+
+    # Tratamento de espaços e caracteres especiais para o comando adb input text
+    # No Android input text, espaço é representado por %s
+    escaped = text.replace(" ", "%s")
+    # Escapa caracteres que podem quebrar o shell
+    escaped = re.sub(r'([\\`"\';|&<>$()])', r'\\\1', escaped)
+
+    success, out = run_adb(["shell", "input", "text", escaped])
+    return {
+        "status": "success" if success else "error",
+        "action": "input_text",
+        "text": text,
+        "message": f"Texto digitado: {text}" if success else f"Erro ao digitar: {out}"
+    }
+
+def send_key_char(char_or_code: str) -> dict:
+    """Envia uma tecla individual (teclado virtual)."""
+    val = str(char_or_code).strip()
+    if not val:
+        return {"status": "error", "message": "Caractere inválido."}
+
+    # Teclas de controle especiais
+    special_keys = {
+        "backspace": "67",  # KEYCODE_DEL
+        "del": "67",
+        "enter": "66",      # KEYCODE_ENTER
+        "space": "62",      # KEYCODE_SPACE
+        "tab": "61",        # KEYCODE_TAB
+        "search": "84",     # KEYCODE_SEARCH
+    }
+
+    low = val.lower()
+    if low in special_keys:
+        keycode = special_keys[low]
+        success, out = run_adb(["shell", "input", "keyevent", keycode])
+        return {"status": "success" if success else "error", "key": low, "keycode": keycode}
+
+    if val.isdigit() and len(val) > 1 and int(val) in range(1, 300):
+        # Keycode direto
+        success, out = run_adb(["shell", "input", "keyevent", val])
+        return {"status": "success" if success else "error", "keycode": val}
+
+    # Caractere alfanumérico ou pontuação
+    if val == " ":
+        success, out = run_adb(["shell", "input", "keyevent", "62"])
+    else:
+        escaped = val.replace(" ", "%s")
+        escaped = re.sub(r'([\\`"\';|&<>$()])', r'\\\1', escaped)
+        success, out = run_adb(["shell", "input", "text", escaped])
+
+    return {"status": "success" if success else "error", "char": val}
+
+def handle_touchpad_motion(dx: float, dy: float) -> dict:
+    """Atualiza a posição virtual do cursor no projetor."""
+    global cursor_state
+    # Sensibilidade de movimento
+    scale = 1.4
+    new_x = max(0, min(1279, int(cursor_state["x"] + dx * scale)))
+    new_y = max(0, min(719, int(cursor_state["y"] + dy * scale)))
+    cursor_state["x"] = new_x
+    cursor_state["y"] = new_y
+    return {"status": "success", "cursor": cursor_state}
+
+def handle_touchpad_tap(x: int = None, y: int = None) -> dict:
+    """Executa um clique/toque na tela nas coordenadas especificadas ou no cursor atual."""
+    global cursor_state
+    tap_x = x if x is not None else cursor_state["x"]
+    tap_y = y if y is not None else cursor_state["y"]
+    success, out = run_adb(["shell", "input", "tap", str(tap_x), str(tap_y)])
+    return {"status": "success" if success else "error", "x": tap_x, "y": tap_y}
+
+def handle_touchpad_swipe(x1: int, y1: int, x2: int, y2: int, duration: int = 200) -> dict:
+    """Executa um gesto de arraste (swipe) na tela."""
+    success, out = run_adb(["shell", "input", "swipe", str(x1), str(y1), str(x2), str(y2), str(duration)])
+    return {"status": "success" if success else "error", "message": "Gesto executado."}
+
+def handle_touchpad_scroll(direction: str) -> dict:
+    """Executa rolagem vertical (scroll up / scroll down)."""
+    if direction == "down":
+        # Rola para baixo (arrasta o conteúdo para cima)
+        return handle_touchpad_swipe(640, 520, 640, 200, 180)
+    else:
+        # Rola para cima (arrasta o conteúdo para baixo)
+        return handle_touchpad_swipe(640, 200, 640, 520, 180)
+
 # ----------------- EVENTOS WEBSOCKET (TEMPO REAL) -----------------
 
 @socketio.on("connect")
 def ws_connect():
-    # Envia o status imediatamente ao novo cliente conectado
     emit("status_update", get_projector_status())
 
 @socketio.on("ping_status")
@@ -180,7 +273,6 @@ def ws_set_ip(data):
         set_projector_ip(new_ip)
         connect_projector()
     st = get_projector_status()
-    # Emite atualização para todos os clientes conectados
     socketio.emit("status_update", st)
 
 @socketio.on("send_command")
@@ -198,6 +290,47 @@ def ws_send_app(data):
     emit("command_response", res)
     time.sleep(0.8)
     socketio.emit("status_update", get_projector_status())
+
+@socketio.on("input_text")
+def ws_input_text(data):
+    txt = data.get("text", "")
+    res = send_text_to_projector(txt)
+    emit("command_response", res)
+
+@socketio.on("input_key")
+def ws_input_key(data):
+    val = data.get("key") or data.get("keycode") or data.get("char")
+    res = send_key_char(val)
+    emit("command_response", res)
+
+@socketio.on("touchpad_motion")
+def ws_touchpad_motion(data):
+    dx = float(data.get("dx", 0))
+    dy = float(data.get("dy", 0))
+    res = handle_touchpad_motion(dx, dy)
+    emit("cursor_update", res)
+
+@socketio.on("touchpad_tap")
+def ws_touchpad_tap(data):
+    x = data.get("x")
+    y = data.get("y")
+    res = handle_touchpad_tap(x, y)
+    emit("command_response", res)
+
+@socketio.on("touchpad_scroll")
+def ws_touchpad_scroll(data):
+    direction = data.get("direction", "down")
+    res = handle_touchpad_scroll(direction)
+    emit("command_response", res)
+
+@socketio.on("touchpad_click")
+def ws_touchpad_click(data):
+    btn = data.get("button", "left")
+    if btn == "right":
+        res = execute_remote_command("voltar")
+    else:
+        res = handle_touchpad_tap()
+    emit("command_response", res)
 
 # ----------------- ROTAS REST (COMPATIBILIDADE E FETCH) -----------------
 
@@ -217,7 +350,6 @@ def status_endpoint():
 
 @app.route("/api/config/ip", methods=["POST", "OPTIONS"])
 def route_update_ip():
-    """Atualiza dinamicamente o IP do projetor via REST."""
     if request.method == "OPTIONS":
         return jsonify({"status": "ok"}), 200
     
@@ -229,8 +361,6 @@ def route_update_ip():
     set_projector_ip(new_ip)
     connect_ok, msg = connect_projector()
     st = get_projector_status()
-    
-    # Notifica via WebSocket também
     socketio.emit("status_update", st)
     
     return jsonify({
@@ -240,6 +370,57 @@ def route_update_ip():
         "message": f"IP atualizado para {get_projector_ip()}! ({msg})",
         "details": st
     })
+
+# Rotas de Teclado e Texto
+@app.route("/api/input/text", methods=["POST", "OPTIONS"])
+def route_input_text():
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    data = request.get_json(silent=True) or request.form
+    text = data.get("text", "") if data else ""
+    return jsonify(send_text_to_projector(text))
+
+@app.route("/api/input/key", methods=["POST", "OPTIONS"])
+def route_input_key():
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    data = request.get_json(silent=True) or request.form
+    char_or_code = data.get("key") or data.get("char") or data.get("keycode") if data else ""
+    return jsonify(send_key_char(char_or_code))
+
+# Rotas de Touchpad e Mouse
+@app.route("/api/touchpad/tap", methods=["POST", "OPTIONS"])
+def route_touchpad_tap():
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    data = request.get_json(silent=True) or request.form or {}
+    x = data.get("x")
+    y = data.get("y")
+    return jsonify(handle_touchpad_tap(x, y))
+
+@app.route("/api/touchpad/swipe", methods=["POST", "OPTIONS"])
+def route_touchpad_swipe():
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    data = request.get_json(silent=True) or request.form or {}
+    x1 = int(data.get("x1", 640))
+    y1 = int(data.get("y1", 360))
+    x2 = int(data.get("x2", 640))
+    y2 = int(data.get("y2", 360))
+    duration = int(data.get("duration", 200))
+    return jsonify(handle_touchpad_swipe(x1, y1, x2, y2, duration))
+
+@app.route("/api/touchpad/scroll", methods=["POST", "OPTIONS"])
+def route_touchpad_scroll():
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    data = request.get_json(silent=True) or request.form or {}
+    direction = data.get("direction", "down")
+    return jsonify(handle_touchpad_scroll(direction))
+
+@app.route("/api/touchpad/click", methods=["POST", "OPTIONS"])
+def route_touchpad_click():
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    data = request.get_json(silent=True) or request.form or {}
+    btn = data.get("button", "left")
+    if btn == "right":
+        return jsonify(execute_remote_command("voltar"))
+    return jsonify(handle_touchpad_tap())
 
 # Rotas de Aplicativos
 @app.route("/app/<app_name>", methods=["GET", "POST", "OPTIONS"])

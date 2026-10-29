@@ -67,3 +67,4 @@ if __name__ == "__main__":
         sys.exit(0)
     except Exception as e:
         print(f"Erro na conexão com a nuvem: {e}")
+
