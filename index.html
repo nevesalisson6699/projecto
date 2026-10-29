@@ -1582,6 +1582,12 @@
     let toastTimer = null;
     let socket = null;
 
+    // Retorna o IP dinâmico configurado (salvo no localStorage)
+    function getProjectorIp() {
+      const saved = localStorage.getItem('projector_ip');
+      return (saved && saved.trim()) ? saved.trim() : '192.168.253.112';
+    }
+
     // Recupera a base de URL da API salva ou determina dinamicamente
     function getApiBase() {
       const saved = localStorage.getItem('projector_api_url');
@@ -1594,10 +1600,30 @@
       return '';
     }
 
+    // Constrói a URL da rota injetando dinamicamente o IP do projetor na query string
     function construirUrl(endpoint) {
       const base = getApiBase();
       const limpo = endpoint.replace(/^\/+/, '');
-      return base ? `${base}/${limpo}` : `/${limpo}`;
+      let url = base ? `${base}/${limpo}` : `/${limpo}`;
+      const ip = getProjectorIp();
+      if (ip) {
+        const sep = url.includes('?') ? '&' : '?';
+        url += `${sep}ip=${encodeURIComponent(ip)}`;
+      }
+      return url;
+    }
+
+    // Helper universal para requisições assíncronas com envio automático do IP via Header e Query
+    function apiFetch(endpoint, options = {}) {
+      const url = construirUrl(endpoint);
+      const opts = Object.assign({}, options);
+      const headers = Object.assign({}, opts.headers || {});
+      const currentIp = getProjectorIp();
+      if (currentIp) {
+        headers['X-Projector-IP'] = currentIp;
+      }
+      opts.headers = headers;
+      return fetch(url, opts);
     }
 
     // Inicializa o IP e URL salvos nos campos correspondentes
@@ -1610,6 +1636,15 @@
       dynamicIpInput.value = savedApiUrl;
       document.getElementById('targetIpDisplay').innerText = savedApiUrl;
     }
+
+    // Persistência instantânea do IP ao digitar no campo
+    dynamicIpInput.addEventListener('input', (e) => {
+      const val = e.target.value.trim();
+      if (val && !val.startsWith('http://') && !val.startsWith('https://')) {
+        localStorage.setItem('projector_ip', val);
+        document.getElementById('targetIpDisplay').innerText = val;
+      }
+    });
 
     // Gerenciamento de Abas
     function trocarAba(abaId, btn) {
@@ -1742,27 +1777,27 @@
         document.getElementById('targetIpDisplay').innerText = targetApiUrl || inputVal;
       }
 
-      showToast(`Atualizando endpoint...`);
+      showToast(`Atualizando endpoint para ${targetIp || targetApiUrl}...`);
       initWebSocket();
 
       try {
         const payload = targetIp ? { ip: targetIp } : { ip: inputVal };
-        const res = await fetch(construirUrl('api/config/ip'), {
+        const res = await apiFetch('api/config/ip', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
         const data = await res.json();
         if (data.details) handleStatusUpdate(data.details);
-        showToast(data.message || 'Endpoint atualizado!');
+        showToast(data.message || 'IP atualizado com sucesso!');
       } catch (err) {
         try {
-          const stRes = await fetch(construirUrl('status'));
+          const stRes = await apiFetch('status');
           const stData = await stRes.json();
           handleStatusUpdate(stData);
           showToast(`Conectado ao servidor!`);
         } catch (stErr) {
-          showToast(`Endpoint salvo! Verificando status...`);
+          showToast(`IP salvo no navegador!`);
         }
       } finally {
         btnDynamicReconnect.innerText = 'Reconectar';
@@ -1771,28 +1806,29 @@
       }
     }
 
-    // Teclado Virtual: Tecla Individual
+    // Teclado Virtual: Tecla Individual Dinâmica
     async function digitarTecla(key) {
       vibrar();
       const label = key === ' ' ? 'Espaço' : (key === 'backspace' ? 'Apagar' : (key === 'enter' ? 'Ir' : key));
       showToast(`Tecla: ${label}`);
+      const currentIp = getProjectorIp();
 
       if (socket && socket.connected) {
-        socket.emit('input_key', { key: key });
+        socket.emit('input_key', { key: key, ip: currentIp });
       }
 
       try {
-        await fetch(construirUrl('api/input/key'), {
+        await apiFetch('api/input/key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: key })
+          body: JSON.stringify({ key: key, ip: currentIp })
         });
       } catch (e) {
         console.warn('Erro ao enviar tecla:', e);
       }
     }
 
-    // Teclado Virtual: Envio de Texto Completo
+    // Teclado Virtual: Envio de Texto Completo Dinâmico
     async function enviarTextoCompleto() {
       const input = document.getElementById('fullTextInput');
       const val = input.value;
@@ -1800,16 +1836,17 @@
       vibrar();
       showToast(`Enviado: ${val}`);
       input.value = '';
+      const currentIp = getProjectorIp();
 
       if (socket && socket.connected) {
-        socket.emit('input_text', { text: val });
+        socket.emit('input_text', { text: val, ip: currentIp });
       }
 
       try {
-        await fetch(construirUrl('api/input/text'), {
+        await apiFetch('api/input/text', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: val })
+          body: JSON.stringify({ text: val, ip: currentIp })
         });
       } catch (e) {
         console.warn('Erro ao enviar texto:', e);
@@ -1830,7 +1867,7 @@
       }
     });
 
-    // MODO TOUCHPAD AVANÇADO
+    // MODO TOUCHPAD AVANÇADO DINÂMICO
     const touchpad = document.getElementById('touchpadSurface');
     let lastX = 0, lastY = 0, startX = 0, startY = 0, isTouching = false, touchStartTime = 0;
     let motionTimer = null;
@@ -1839,9 +1876,10 @@
     function dispatchTouchpadMotion(dx, dy) {
       accDx += dx;
       accDy += dy;
+      const currentIp = getProjectorIp();
 
       if (socket && socket.connected) {
-        socket.emit('touchpad_motion', { dx: dx, dy: dy });
+        socket.emit('touchpad_motion', { dx: dx, dy: dy, ip: currentIp });
       }
 
       if (!motionTimer) {
@@ -1853,10 +1891,10 @@
           motionTimer = null;
 
           if (Math.abs(sendDx) > 0.5 || Math.abs(sendDy) > 0.5) {
-            fetch(construirUrl('api/touchpad/motion'), {
+            apiFetch('api/touchpad/motion', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ dx: sendDx, dy: sendDy })
+              body: JSON.stringify({ dx: sendDx, dy: sendDy, ip: currentIp })
             }).catch(() => {});
           }
         }, 35);
@@ -1904,14 +1942,15 @@
     async function enviarTapTouchpad() {
       vibrar();
       showToast('Toque / Clique');
+      const currentIp = getProjectorIp();
       if (socket && socket.connected) {
-        socket.emit('touchpad_tap', {});
+        socket.emit('touchpad_tap', { ip: currentIp });
       }
       try {
-        await fetch(construirUrl('api/touchpad/tap'), {
+        await apiFetch('api/touchpad/tap', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
+          body: JSON.stringify({ ip: currentIp })
         });
       } catch (e) {}
     }
@@ -1919,14 +1958,15 @@
     async function enviarCliqueTouchpad(button) {
       vibrar();
       showToast(button === 'left' ? 'Clique Esquerdo' : 'Voltar');
+      const currentIp = getProjectorIp();
       if (socket && socket.connected) {
-        socket.emit('touchpad_click', { button: button });
+        socket.emit('touchpad_click', { button: button, ip: currentIp });
       }
       try {
-        await fetch(construirUrl('api/touchpad/click'), {
+        await apiFetch('api/touchpad/click', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ button: button })
+          body: JSON.stringify({ button: button, ip: currentIp })
         });
       } catch (e) {}
     }
@@ -1934,19 +1974,20 @@
     async function enviarScrollTouchpad(direction) {
       vibrar();
       showToast(direction === 'up' ? 'Rolar Cima' : 'Rolar Baixo');
+      const currentIp = getProjectorIp();
       if (socket && socket.connected) {
-        socket.emit('touchpad_scroll', { direction: direction });
+        socket.emit('touchpad_scroll', { direction: direction, ip: currentIp });
       }
       try {
-        await fetch(construirUrl('api/touchpad/scroll'), {
+        await apiFetch('api/touchpad/scroll', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ direction: direction })
+          body: JSON.stringify({ direction: direction, ip: currentIp })
         });
       } catch (e) {}
     }
 
-    // Funções do Guia Tailscale
+    // Funções do Guia Tailscale Dinâmicas
     async function verificarTailscaleProjetor() {
       const statusVal = document.getElementById('tsStatusVal');
       const btnOpen = document.getElementById('btnTsOpen');
@@ -1956,7 +1997,7 @@
       if (!statusVal) return;
       statusVal.innerText = 'Consultando...';
       try {
-        const res = await fetch(construirUrl('api/tailscale/status'));
+        const res = await apiFetch('api/tailscale/status');
         const data = await res.json();
         
         if (data.active && data.tailscale_ip) {
@@ -1984,7 +2025,11 @@
       vibrar();
       showToast('Abrindo Tailscale no projetor...');
       try {
-        const res = await fetch(construirUrl('api/tailscale/open'), { method: 'POST' });
+        const res = await apiFetch('api/tailscale/open', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: getProjectorIp() })
+        });
         const data = await res.json();
         if (data.message) showToast(data.message);
       } catch (err) {
@@ -2021,37 +2066,48 @@
       }
     }
 
-    // Inicialização de Aplicativos
+    // Inicialização de Aplicativos Dinâmica
     async function iniciarApp(appKey, label) {
       vibrar();
       showToast(`Abrindo ${label}...`);
+      const currentIp = getProjectorIp();
       if (socket && socket.connected) {
-        socket.emit('send_app', { app: appKey });
+        socket.emit('send_app', { app: appKey, ip: currentIp });
       }
       try {
-        await fetch(construirUrl(`app/${appKey}`), { method: 'POST' });
+        await apiFetch(`app/${appKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: currentIp })
+        });
       } catch (e) {}
     }
 
-    // Envio de Comandos Físicos do D-pad e Sistema
+    // Envio de Comandos Físicos do D-pad e Sistema Dinâmico
     async function enviarComando(cmd, label) {
       vibrar();
       showToast(label || cmd.toUpperCase());
+      const currentIp = getProjectorIp();
       if (socket && socket.connected) {
-        socket.emit('send_command', { cmd: cmd });
+        socket.emit('send_command', { cmd: cmd, ip: currentIp });
       }
       try {
-        await fetch(construirUrl(cmd), { method: 'POST' });
+        await apiFetch(cmd, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: currentIp })
+        });
       } catch (e) {}
     }
 
-    // Verificação de Status Periódica
+    // Verificação de Status Periódica Dinâmica
     async function checkStatus() {
+      const currentIp = getProjectorIp();
       if (socket && socket.connected) {
-        socket.emit('ping_status');
+        socket.emit('ping_status', { ip: currentIp });
       }
       try {
-        const res = await fetch(construirUrl('status'));
+        const res = await apiFetch('status');
         if (res.ok) {
           const data = await res.json();
           handleStatusUpdate(data);
@@ -2092,8 +2148,21 @@
       }
       showToast('Testando conexão...');
       try {
-        const testUrl = `${val}/status`;
-        const res = await fetch(testUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
+        const currentIp = getProjectorIp();
+        const sep = val.includes('?') ? '&' : '?';
+        const testUrl = currentIp ? `${val}/status${sep}ip=${encodeURIComponent(currentIp)}` : `${val}/status`;
+        const headers = currentIp ? { 'Accept': 'application/json', 'X-Projector-IP': currentIp } : { 'Accept': 'application/json' };
+        const res = await fetch(testUrl, { method: 'GET', headers: headers });
+        if (res.ok) {
+          const data = await res.json();
+          showToast(`Conectado! Status: ${data.status.toUpperCase()}`);
+        } else {
+          showToast(`Erro na resposta: HTTP ${res.status}`);
+        }
+      } catch (err) {
+        showToast('Falha ao conectar na URL informada');
+      }
+    }
         if (res.ok) {
           const data = await res.json();
           showToast(`Conectado! Status: ${data.status.toUpperCase()}`);
