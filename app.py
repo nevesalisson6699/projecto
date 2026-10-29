@@ -435,6 +435,43 @@ def route_list_apps():
     if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
     return jsonify(APPS)
 
+# Rotas Tailscale (Guia e Telemetria Remota)
+@app.route("/api/tailscale/status", methods=["GET", "OPTIONS"])
+def route_tailscale_status():
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    
+    # Checa se o pacote com.tailscale.ipn está instalado
+    ok_pkg, out_pkg = run_adb(["shell", "pm", "list", "packages", "com.tailscale.ipn"])
+    is_installed = ok_pkg and "com.tailscale.ipn" in out_pkg
+
+    # Checa se há interface com IP na faixa 100.x.x.x
+    tailscale_ip = None
+    ok_ip, out_ip = run_adb(["shell", "ip", "-o", "addr", "show"])
+    if ok_ip:
+        for line in out_ip.splitlines():
+            if "inet 100." in line:
+                parts = line.split()
+                for idx, part in enumerate(parts):
+                    if part == "inet" and idx + 1 < len(parts):
+                        tailscale_ip = parts[idx + 1].split("/")[0]
+                        break
+
+    return jsonify({
+        "status": "success",
+        "installed": is_installed,
+        "tailscale_ip": tailscale_ip,
+        "active": bool(tailscale_ip)
+    })
+
+@app.route("/api/tailscale/open", methods=["POST", "OPTIONS"])
+def route_tailscale_open():
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    ok, out = run_adb(["shell", "monkey", "-p", "com.tailscale.ipn", "-c", "android.intent.category.LAUNCHER", "1"])
+    return jsonify({
+        "status": "success" if ok else "error",
+        "message": "Abrindo Tailscale no projetor..." if ok else f"Erro ao abrir Tailscale: {out}"
+    })
+
 # Rota Genérica para Comandos
 @app.route("/api/cmd/<command>", methods=["GET", "POST", "OPTIONS"])
 def api_command(command):

@@ -127,5 +127,11 @@ APPS = {
         "package": "com.htc.htclauncherhighenglishd08",
         "icon": "home",
         "color": "#0ea5e9"
+    },
+    "tailscale": {
+        "name": "Tailscale",
+        "package": "com.tailscale.ipn",
+        "icon": "shield",
+        "color": "#4f46e5"
     }
 }

@@ -12,22 +12,29 @@ Painel web moderno, responsivo e com suporte a arquitetura híbrida (Cloudflare 
    - Detecção dinâmica de status *Online/Offline*.
    - **Gerenciamento Dinâmico de IP**: Quando desconectado, exibe um painel interativo para atualizar o IP local, IP Tailscale (`100.x.x.x`) ou URL de túnel com salvamento automático no `localStorage`.
 
-2. **Teclado Virtual Inteligente (QWERTY & Numérico)**:
+2. **Guia Remoto / Tailscale Integrado**:
+   - Tutorial passo a passo ilustrado para conectar o projetor à rede privada WireGuard (Tailscale).
+   - Instruções detalhadas para o Projetor (instalação via APK/ADB e login) e Celular (Google Play / App Store).
+   - Botão de verificação de status e telemetria do Tailscale em tempo real via ADB (`/api/tailscale/status`).
+   - Botão para aplicar o IP `100.x.x.x` detectado com 1 clique direto no painel.
+
+3. **Teclado Virtual Inteligente (QWERTY & Numérico)**:
    - Alternância entre layout **QWERTY (Letras)** e **123 (Numérico / PIN)**.
    - Digitação em tempo real no campo focado da tela do projetor.
    - Barra de envio de textos completos ou links via `adb input text`.
    - Teclas de controle dedicadas: Backspace (⌫), Espaço (␣) e Ir / Enter (⏎).
 
-3. **Modo Touchpad Avançado (Mouse / Cursor)**:
+4. **Modo Touchpad Avançado (Mouse / Cursor)**:
    - Superfície tátil sensível ao toque para arrastar o cursor livremente na tela (1280x720).
    - Suporte a toques secos (clique esquerdo) e gestos de arraste (*swipe*).
    - Botões físicos virtuais: Clique Esquerdo, Botão Voltar (Cancelar) e Rolagem vertical (Scroll Cima / Scroll Baixo).
 
-4. **Navegação por Abas (Mobile First)**:
+5. **Navegação por Abas (Mobile First)**:
    - 📱 **Controle**: D-pad ergonômico, botões de sistema (Power, Mute, Menu, Voltar, Home), volume e otimização de RAM (`am kill-all`).
    - 📺 **Apps**: Abertura em 1 clique dos apps (YouTube, Netflix, Prime Video, YouCine, Chrome, UniTV, Ajustes e Início).
    - 🖱️ **Touchpad**: Modo mouse completo.
    - ⌨️ **Teclado**: Digitação inteligente.
+   - 🛡️ **Tailscale**: Guia de acesso remoto mundial e status da VPN.
    - Efeito visual ripple e vibração tátil leve (`navigator.vibrate(25)`).
 
 ---
@@ -68,6 +75,8 @@ projetor/
 | `/api/touchpad/swipe`| `POST` | Executa gesto de arraste (swipe) na tela |
 | `/api/touchpad/scroll`| `POST` | Executa rolagem vertical (up / down) |
 | `/api/touchpad/click`| `POST` | Executa clique esquerdo ou direito |
+| `/api/tailscale/status`| `GET` | Retorna se o Tailscale está instalado e o IP 100.x ativo |
+| `/api/tailscale/open`| `POST` | Dispara a inicialização do app Tailscale no projetor |
 | `/app/<app_name>` | `POST/GET` | Dispara a inicialização de aplicativos |
 | `/otimizar` | `POST/GET` | Executa `am kill-all` para liberar memória RAM |
 | `WS send_command` | Socket.IO | Envia comando de navegação em tempo real |
