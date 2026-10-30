@@ -6,9 +6,8 @@ import threading
 import time
 import base64
 import hashlib
-import hmac
+from urllib.parse import urlsplit
 from flask import Flask, render_template, jsonify, request
-from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import discovery
 from config import (
@@ -18,8 +17,7 @@ from config import (
     SERVER_HOST,
     SERVER_PORT,
     DEBUG_MODE,
-    CORS_ORIGINS,
-    API_TOKEN,
+    is_lan_ip,
     ADB_BIN,
     KEYCODES,
     APPS
@@ -27,44 +25,23 @@ from config import (
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# Habilita CORS completo em todas as rotas (Cloudflare Pages, etc).
-# allow_private_network: o Chrome bloqueia um site público (pages.dev) chamando
-# localhost/IP privado sem o header Access-Control-Allow-Private-Network no preflight.
-CORS(
-    app,
-    resources={r"/*": {"origins": CORS_ORIGINS}},
-    methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-Projector-IP", "X-Api-Token"],
-    allow_private_network=True,
-    max_age=600,
-)
-
-# Servidor WebSocket em tempo real para comunicação com o front-end na nuvem
-socketio = SocketIO(app, cors_allowed_origins=CORS_ORIGINS, async_mode="threading")
+# Sem CORS: o painel é servido por este mesmo servidor, então só a própria origem fala com a API.
+# Socket.IO com cors_allowed_origins=None aceita apenas a mesma origem.
+socketio = SocketIO(app, async_mode="threading")
 
 # Posição virtual do cursor (Resolução nativa 1280x720)
 cursor_state = {"x": 640, "y": 360}
 
-# ----------------- AUTENTICAÇÃO (obrigatória quando exposto na internet) -----------------
-# O backend dá shell ADB no projetor e, na nuvem, fica dentro do tailnet: sem token,
-# qualquer um com a URL controlaria o projetor e alcançaria outros aparelhos da VPN.
-_PUBLIC_PATHS = {"/", "/health"}
-
-def _token_ok(token) -> bool:
-    return bool(token) and hmac.compare_digest(str(token), API_TOKEN)
-
-def _request_token():
-    auth = request.headers.get("Authorization", "")
-    if auth.lower().startswith("bearer "):
-        return auth[7:].strip()
-    return request.headers.get("X-Api-Token") or request.args.get("token")
-
+# ----------------- ACESSO SOMENTE PELA REDE LOCAL -----------------
+# O backend dá shell ADB no projetor: só aceita quem está na mesma rede (IP privado/loopback)
+# e recusa requisições disparadas por outros sites (Origin diferente do próprio painel).
 @app.before_request
-def require_api_token():
-    if not API_TOKEN or request.method == "OPTIONS" or request.path in _PUBLIC_PATHS:
-        return None
-    if not _token_ok(_request_token()):
-        return jsonify({"status": "unauthorized", "message": "Token de acesso inválido ou ausente."}), 401
+def require_same_network():
+    if not is_lan_ip(request.remote_addr):
+        return jsonify({"status": "forbidden", "message": "Acesso permitido somente na mesma rede do projetor."}), 403
+    origin = request.headers.get("Origin")
+    if origin and urlsplit(origin).netloc != request.host:
+        return jsonify({"status": "forbidden", "message": "Origem não permitida."}), 403
 
 def _normalize_target(raw: str) -> str:
     # Remove protocolos http/https e barras residuais caso o usuário envie URL completa
@@ -113,7 +90,7 @@ def resolve_target(custom_ip_or_target: str = None) -> str:
 def run_adb(args: list[str], target: str = None, timeout: int = 8) -> tuple[bool, str]:
     """Executa um comando ADB diretamente no projetor de forma dinâmica e segura."""
     resolved = resolve_target(target)
-    cmd = [ADB_BIN, "-s", discovery.serial(resolved)] + args
+    cmd = [ADB_BIN, "-s", resolved] + args
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         output = (res.stdout or res.stderr).strip()
@@ -132,7 +109,7 @@ def connect_projector(custom_target: str = None) -> tuple[bool, str]:
     """Conecta dinamicamente ao IP do projetor via ADB."""
     resolved = resolve_target(custom_target)
     try:
-        res = subprocess.run([ADB_BIN, "connect", discovery.serial(resolved)], capture_output=True, text=True, timeout=8)
+        res = subprocess.run([ADB_BIN, "connect", resolved], capture_output=True, text=True, timeout=8)
         out = (res.stdout or res.stderr).strip()
         success = "connected to" in out.lower() or "already connected" in out.lower()
         return success, out
@@ -171,7 +148,6 @@ def get_projector_status(target: str = None) -> dict:
         "target": resolved,
         "via": discovery.state["via"],
         "scanning": discovery.state["scanning"],
-        "tailscale_hardened": discovery.state["tailscale_hardened"],
         "current_app": get_current_app(target=resolved) if is_online else "Desconectado",
         "cursor": cursor_state,
         "details": "device" if is_online else "Não conectado"
@@ -536,8 +512,7 @@ def handle_touchpad_scroll(direction: str, target: str = None) -> dict:
 @socketio.on("connect")
 def ws_connect(auth=None):
     # O handshake do Socket.IO não passa pelo before_request do Flask
-    if API_TOKEN and not _token_ok((auth or {}).get("token") if isinstance(auth, dict) else None) \
-            and not _token_ok(_request_token()):
+    if not is_lan_ip(request.remote_addr):
         return False
     emit("status_update", get_projector_status())
 
@@ -741,47 +716,6 @@ def route_list_apps():
     if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
     return jsonify(APPS)
 
-# Rotas Tailscale (Guia e Telemetria Remota)
-@app.route("/api/tailscale/status", methods=["GET", "OPTIONS"])
-def route_tailscale_status():
-    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
-    
-    # Checa se o pacote com.tailscale.ipn está instalado
-    ok_pkg, out_pkg = run_adb(["shell", "pm", "list", "packages", "com.tailscale.ipn"])
-    is_installed = ok_pkg and "com.tailscale.ipn" in out_pkg
-
-    # Checa se há interface com IP na faixa 100.x.x.x
-    tailscale_ip = None
-    ok_ip, out_ip = run_adb(["shell", "ip", "-o", "addr", "show"])
-    if ok_ip:
-        for line in out_ip.splitlines():
-            if "inet 100." in line:
-                parts = line.split()
-                for idx, part in enumerate(parts):
-                    if part == "inet" and idx + 1 < len(parts):
-                        tailscale_ip = parts[idx + 1].split("/")[0]
-                        break
-
-    return jsonify({
-        "status": "success",
-        "installed": is_installed,
-        "tailscale_ip": tailscale_ip,
-        "active": bool(tailscale_ip)
-    })
-
-@app.route("/api/tailscale/open", methods=["POST", "OPTIONS"])
-def route_tailscale_open():
-    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
-    target = resolve_target()
-    ok, out = run_adb(["shell", "monkey", "-p", "com.tailscale.ipn", "-c", "android.intent.category.LAUNCHER", "1"], target=target)
-    if ok:
-        trigger_projector_feedback(target=target, message="Executado, acunha!", force_dialog=True)
-    return jsonify({
-        "status": "success" if ok else "error",
-        "message": "Abrindo Tailscale no projetor..." if ok else f"Erro ao abrir Tailscale: {out}",
-        "target": target
-    })
-
 # Rota de Feedback Visual no Projetor (Executado, Acunha!!!)
 @app.route("/api/feedback", methods=["GET", "POST", "OPTIONS"])
 def route_feedback():
@@ -824,7 +758,7 @@ def route_otimizar_profundo():
         # 5. Renderização por Hardware GPU 2D
         ["shell", "setprop", "debug.hwui.renderer", "opengl"],
         ["shell", "settings", "put", "global", "force_gpu_rendering", "1"],
-        # 6. Desativar bloatwares/serviços ociosos de fábrica (mantendo Tailscale e sistema intactos)
+        # 6. Desativar bloatwares/serviços ociosos de fábrica (mantendo o sistema intacto)
         ["shell", "pm", "disable-user", "--user", "0", "com.android.dreams.basic"],
         ["shell", "pm", "disable-user", "--user", "0", "com.bozee.usbdisplay"],
         # 7. Limpeza agressiva de cache e processos
@@ -930,7 +864,7 @@ def route_screencap():
     target = resolve_target()
 
     # Executa screencap via exec-out para stream binário
-    cmd = [ADB_BIN, "-s", discovery.serial(target), "exec-out", "screencap", "-p"]
+    cmd = [ADB_BIN, "-s", target, "exec-out", "screencap", "-p"]
     try:
         proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8)
         if proc.returncode == 0 and len(proc.stdout) > 1000:
@@ -1023,16 +957,14 @@ def get_network_ips():
     try:
         hostname = socket.gethostname()
         for ip in socket.gethostbyname_ex(hostname)[2]:
-            if not ip.startswith("127."):
+            if not ip.startswith("127.") and is_lan_ip(ip):
                 ips.append(ip)
     except Exception:
         pass
     return ips
 
 if __name__ == "__main__":
-    if not API_TOKEN and os.environ.get("TS_USERSPACE"):
-        raise SystemExit("[-] API_TOKEN é obrigatório no modo nuvem (backend exposto na internet dentro do tailnet).")
-    print("[*] Auto-descoberta do projetor iniciada (Tailscale -> ARP/MAC -> varredura da LAN)...")
+    print("[*] Auto-descoberta do projetor iniciada (último IP -> ARP/MAC -> varredura da LAN)...")
     discovery.start(on_change=lambda: socketio.emit("status_update", get_projector_status()))
 
     network_ips = get_network_ips()

@@ -1,7 +1,0 @@
-.git
-.vscode
-__pycache__
-*.pyc
-*.apk
-*.png
-.env

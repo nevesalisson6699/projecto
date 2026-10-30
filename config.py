@@ -1,7 +1,8 @@
+import ipaddress
 import os
 import shutil
 
-# Configurações de Rede do Projetor (Dinâmico: Suporta IP Local, Tailscale 100.x ou Nuvem)
+# Configurações de Rede do Projetor (somente rede local)
 DEFAULT_PROJECTOR_IP = os.environ.get("PROJECTOR_IP", "192.168.253.112")
 PROJECTOR_PORT = int(os.environ.get("PROJECTOR_PORT", 5555))
 
@@ -24,23 +25,30 @@ def set_projector_ip(new_ip: str) -> str:
 def get_projector_target() -> str:
     return f"{get_projector_ip()}:{PROJECTOR_PORT}"
 
-# Auto-descoberta do projetor HY320 (ordem: Tailscale -> último IP -> MAC na ARP -> varredura da LAN)
-PROJECTOR_TAILSCALE_IP = os.environ.get("PROJECTOR_TAILSCALE_IP", "100.123.35.13")
+# Auto-descoberta do projetor HY320 na rede local (ordem: último IP -> MAC na ARP -> varredura da LAN)
 PROJECTOR_MAC = os.environ.get("PROJECTOR_MAC", "26:80:ab:03:43:dd")
-LAN_SUBNET = os.environ.get("LAN_SUBNET", "192.168.253.0/24")  # vazio desativa a varredura (nuvem)
-TAILSCALE_PACKAGE = "com.tailscale.ipn"
+LAN_SUBNET = os.environ.get("LAN_SUBNET", "192.168.253.0/24")  # vazio desativa a varredura
 
-# Nuvem: tailscaled em modo userspace (sem TUN); o ADB alcança 100.x via socat + 'tailscale nc'
-TAILSCALE_USERSPACE = os.environ.get("TS_USERSPACE", "0").lower() in ("1", "true")
+# Acesso permitido somente da mesma rede: loopback e faixas privadas (RFC 1918 / link-local / IPv6 ULA).
+# A faixa do Tailscale (100.64.0.0/10) e IPs públicos ficam de fora de propósito.
+_LAN_NETWORKS = [ipaddress.ip_network(n) for n in (
+    "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+    "::1/128", "fc00::/7", "fe80::/10",
+)]
 
-# Token exigido em todas as rotas (exceto /health e a página) quando definido. Obrigatório na nuvem.
-API_TOKEN = os.environ.get("API_TOKEN", "")
+def is_lan_ip(ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(str(ip).split("%")[0])
+    except ValueError:
+        return False
+    if getattr(addr, "ipv4_mapped", None):
+        addr = addr.ipv4_mapped
+    return any(addr in net for net in _LAN_NETWORKS)
 
 # Configurações do Servidor Web Flask e WebSocket
 SERVER_HOST = os.environ.get("HOST", "0.0.0.0")
 SERVER_PORT = int(os.environ.get("PORT", 5050))
 DEBUG_MODE = os.environ.get("FLASK_DEBUG", "0").lower() in ("1", "true")
-CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
 
 # Auto-localização do Executável do ADB (Multiplataforma: Windows e Linux/Container)
 def find_adb():
@@ -157,11 +165,5 @@ APPS = {
         "package": "com.spocky.projengmenu",
         "icon": "home",
         "color": "#10b981"
-    },
-    "tailscale": {
-        "name": "Tailscale",
-        "package": "com.tailscale.ipn",
-        "icon": "shield",
-        "color": "#4f46e5"
     }
 }
