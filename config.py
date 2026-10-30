@@ -80,11 +80,23 @@ KEYCODES = {
 
 # Aplicativos Principais do Projetor
 APPS = {
-    "youtube": {
-        "name": "YouTube",
-        "package": "com.google.android.youtube.tv",
+    "smarttube": {
+        "name": "SmartTube (YouTube Leve)",
+        "package": "org.smarttube.stable",
         "icon": "youtube",
         "color": "#ef4444"
+    },
+    "youtube": {
+        "name": "SmartTube (YouTube Leve)",
+        "package": "org.smarttube.stable",
+        "icon": "youtube",
+        "color": "#ef4444"
+    },
+    "youtube_original": {
+        "name": "YouTube Oficial",
+        "package": "com.google.android.youtube.tv",
+        "icon": "youtube",
+        "color": "#dc2626"
     },
     "netflix": {
         "name": "Netflix",
