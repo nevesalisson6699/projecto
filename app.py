@@ -334,8 +334,9 @@ def trigger_projector_feedback(target: str = None, message: str = "Executado, ac
                 run_adb(write_cmd, target=resolved)
 
             # 3. Abre o diálogo flutuante na UI do Android
+            # Via 'su 0': com o adbd sem root (após reboot) o shell não consegue abrir file:// no HTMLViewer
             view_cmd = [
-                "shell", "am", "start",
+                "shell", "su", "0", "am", "start",
                 "-a", "android.intent.action.VIEW",
                 "-d", f"file://{FEEDBACK_REMOTE_PATH}",
                 "-t", "text/html",
