@@ -266,8 +266,8 @@ FEEDBACK_HTML_CONTENT = """<!DOCTYPE html>
   <div class="badge">
     <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
   </div>
-  <div class="msg-title">Executado, acunha!</div>
-  <div class="msg-sub">Comando processado com sucesso</div>
+  <div class="msg-title">Executado, Acunha!!!</div>
+  <div class="msg-sub">Otimizações & Sistema Atualizados com Sucesso</div>
   <button id="closeBtn" class="btn-close" autofocus onclick="dismiss()">Fechar [OK]</button>
   <div class="timer-bar">
     <div class="timer-fill"></div>
@@ -747,17 +747,166 @@ def route_tailscale_open():
         "target": target
     })
 
-# Rota de Feedback Visual no Projetor (Executado, acunha!)
+# Rota de Feedback Visual no Projetor (Executado, Acunha!!!)
 @app.route("/api/feedback", methods=["GET", "POST", "OPTIONS"])
 def route_feedback():
     if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
     target = resolve_target()
-    trigger_projector_feedback(target=target, message="Executado, acunha!", force_dialog=True)
+    trigger_projector_feedback(target=target, message="Executado, Acunha!!!", force_dialog=True)
     return jsonify({
         "status": "success",
-        "message": "Executado, acunha!",
+        "message": "Executado, Acunha!!!",
         "target": target
     })
+
+# ----------------- NOVAS ROTAS: OTIMIZAÇÃO PROFUNDA, REDE, DISPLAY & UTILS -----------------
+
+@app.route("/otimizar_profundo", methods=["GET", "POST", "OPTIONS"])
+@app.route("/api/otimizar_profundo", methods=["GET", "POST", "OPTIONS"])
+def route_otimizar_profundo():
+    """Aplica otimização extrema de RAM, animações, Wi-Fi e tempo de tela de 60 min no projetor."""
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    target = resolve_target()
+
+    commands = [
+        # 1. Tempo de tela e inatividade: 60 minutos (3.600.000 ms)
+        ["shell", "settings", "put", "system", "screen_off_timeout", "3600000"],
+        ["shell", "settings", "put", "secure", "sleep_timeout", "3600000"],
+        ["shell", "settings", "put", "secure", "screensaver_enabled", "0"],
+        # 2. Desativação total de animações (fluidez imediata)
+        ["shell", "settings", "put", "global", "window_animation_scale", "0.0"],
+        ["shell", "settings", "put", "global", "transition_animation_scale", "0.0"],
+        ["shell", "settings", "put", "global", "animator_duration_scale", "0.0"],
+        # 3. Wi-Fi e Bluetooth estabilizados (Sem economia agressiva ou varredura de fundo)
+        ["shell", "settings", "put", "global", "wifi_sleep_policy", "2"],
+        ["shell", "cmd", "wifi", "set-wifi-saver-enabled", "false"],
+        ["shell", "settings", "put", "global", "wifi_scan_always_enabled", "0"],
+        ["shell", "settings", "put", "global", "ble_scan_always_enabled", "0"],
+        # 4. DNS de Alta Performance (Cloudflare 1.1.1.1)
+        ["shell", "settings", "put", "global", "private_dns_mode", "hostname"],
+        ["shell", "settings", "put", "global", "private_dns_specifier", "one.one.one.one"],
+        # 5. Renderização por Hardware GPU 2D
+        ["shell", "setprop", "debug.hwui.renderer", "opengl"],
+        ["shell", "settings", "put", "global", "force_gpu_rendering", "1"],
+        # 6. Desativar bloatwares/serviços ociosos de fábrica (mantendo Tailscale e sistema intactos)
+        ["shell", "pm", "disable-user", "--user", "0", "com.android.dreams.basic"],
+        ["shell", "pm", "disable-user", "--user", "0", "com.bozee.usbdisplay"],
+        # 7. Limpeza agressiva de cache e processos
+        ["shell", "pm", "trim-caches", "999999999999999999"],
+        ["shell", "am", "kill-all"],
+    ]
+
+    results = []
+    for cmd in commands:
+        ok, out = run_adb(cmd, target=target, timeout=4)
+        results.append({"cmd": " ".join(cmd), "success": ok, "out": out.strip()})
+
+    # Instalação do Projectivy Launcher se o APK estiver baixado
+    projectivy_path = os.path.join(os.path.dirname(__file__), "projectivy.apk")
+    if os.path.exists(projectivy_path):
+        install_ok, install_out = run_adb(["install", "-r", projectivy_path], target=target, timeout=25)
+        results.append({"cmd": "install projectivy.apk", "success": install_ok, "out": install_out.strip()})
+
+    # Dispara a tela comemorativa interativa no projetor
+    trigger_projector_feedback(target=target, message="Executado, Acunha!!!", force_dialog=True)
+
+    return jsonify({
+        "status": "success",
+        "message": "Otimização profunda aplicada com sucesso! (Tela: 60min, Animações 0x, Wi-Fi turbo, GPU 2D e Projectivy Launcher)",
+        "target": target,
+        "results": results
+    })
+
+@app.route("/api/cast", methods=["POST", "OPTIONS"])
+def route_cast_url():
+    """Abre links, streams ou vídeos diretamente no projetor via intent VIEW."""
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    target = resolve_target()
+    data = request.get_json(silent=True) or request.form or {}
+    url = (data.get("url") or "").strip()
+    if not url:
+        return jsonify({"status": "error", "message": "Nenhuma URL informada."}), 400
+
+    # Lança a URL no navegador/app correspondente do projetor
+    cmd = ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", url]
+    ok, out = run_adb(cmd, target=target)
+    if ok:
+        trigger_projector_feedback(target=target, message="Executado, Acunha!!!", force_dialog=False)
+
+    return jsonify({
+        "status": "success" if ok else "error",
+        "message": f"Abrindo link no projetor: {url}" if ok else f"Falha ao abrir link: {out}",
+        "target": target
+    })
+
+@app.route("/api/display/brightness", methods=["POST", "OPTIONS"])
+def route_set_brightness():
+    """Ajusta o nível de brilho do sistema (0 a 255)."""
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    target = resolve_target()
+    data = request.get_json(silent=True) or request.form or {}
+    val = int(data.get("brightness", 255))
+    val = max(10, min(255, val))
+
+    cmd = ["shell", "settings", "put", "system", "screen_brightness", str(val)]
+    ok, out = run_adb(cmd, target=target)
+    return jsonify({
+        "status": "success" if ok else "error",
+        "brightness": val,
+        "message": f"Brilho ajustado para {val}/255",
+        "target": target
+    })
+
+@app.route("/api/display/reset_overscan", methods=["POST", "OPTIONS"])
+def route_reset_overscan():
+    """Restaura o overscan nativo 1:1 e ajusta densidade para nitidez máxima."""
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    target = resolve_target()
+    run_adb(["shell", "wm", "overscan", "0,0,0,0"], target=target)
+    run_adb(["shell", "wm", "density", "160"], target=target)
+    trigger_projector_feedback(target=target, message="Executado, Acunha!!!", force_dialog=True)
+    return jsonify({
+        "status": "success",
+        "message": "Escala nativa 1:1 restaurada com densidade 160 DPI!",
+        "target": target
+    })
+
+@app.route("/api/display/picture_settings", methods=["POST", "OPTIONS"])
+def route_picture_settings():
+    """Abre o menu nativo de ajustes de imagem e calibragem do projetor."""
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    target = resolve_target()
+    # Tenta abrir o menu de configurações do chip de exibição (DroidLogic / HTC)
+    ok, out = run_adb(["shell", "monkey", "-p", "com.droidlogic.tv.settings", "-c", "android.intent.category.LAUNCHER", "1"], target=target)
+    if not ok:
+        ok, out = run_adb(["shell", "am", "start", "-a", "android.settings.DISPLAY_SETTINGS"], target=target)
+    return jsonify({
+        "status": "success" if ok else "error",
+        "message": "Abrindo ajustes de imagem no projetor..." if ok else f"Erro ao abrir ajustes: {out}",
+        "target": target
+    })
+
+@app.route("/api/screencap", methods=["GET", "POST", "OPTIONS"])
+def route_screencap():
+    """Captura a tela atual do projetor em tempo real e retorna como base64 PNG."""
+    if request.method == "OPTIONS": return jsonify({"status": "ok"}), 200
+    target = resolve_target()
+
+    # Executa screencap via exec-out para stream binário
+    cmd = [ADB_BIN, "-s", target, "exec-out", "screencap", "-p"]
+    try:
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8)
+        if proc.returncode == 0 and len(proc.stdout) > 1000:
+            b64_img = base64.b64encode(proc.stdout).decode("ascii")
+            return jsonify({
+                "status": "success",
+                "image": f"data:image/png;base64,{b64_img}",
+                "target": target
+            })
+    except Exception as e:
+        pass
+
+    return jsonify({"status": "error", "message": "Falha ao capturar tela do projetor."}), 500
 
 # Rota Genérica para Comandos
 @app.route("/api/cmd/<command>", methods=["GET", "POST", "OPTIONS"])

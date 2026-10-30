@@ -140,6 +140,12 @@ APPS = {
         "icon": "home",
         "color": "#0ea5e9"
     },
+    "projectivy": {
+        "name": "Projectivy Launcher",
+        "package": "com.spocky.projengmenu",
+        "icon": "home",
+        "color": "#10b981"
+    },
     "tailscale": {
         "name": "Tailscale",
         "package": "com.tailscale.ipn",
