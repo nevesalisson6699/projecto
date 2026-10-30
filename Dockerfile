@@ -1,10 +1,14 @@
 FROM python:3.11-slim
 
-# Instala ferramentas do sistema e o binário ADB oficial
+# ADB oficial + socat (ponte TCP do ADB para o Tailscale em modo userspace)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     android-tools-adb \
-    curl \
+    socat \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Binários oficiais do Tailscale (método recomendado pela Tailscale para containers sem TUN)
+COPY --from=docker.io/tailscale/tailscale:stable /usr/local/bin/tailscaled /usr/local/bin/tailscale /usr/local/bin/
 
 WORKDIR /app
 
@@ -14,13 +18,19 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia o código da aplicação
 COPY . .
+RUN chmod +x entrypoint.sh
 
-# Variáveis de ambiente padrão
-ENV PORT=5050
-ENV HOST=0.0.0.0
-ENV PROJECTOR_IP=192.168.253.112
-ENV PROJECTOR_PORT=5555
+# Na nuvem o projetor é alcançado só pelo Tailscale: sem varredura de LAN nem ARP
+ENV PORT=5050 \
+    HOST=0.0.0.0 \
+    PROJECTOR_IP=100.123.35.13 \
+    PROJECTOR_TAILSCALE_IP=100.123.35.13 \
+    PROJECTOR_PORT=5555 \
+    LAN_SUBNET= \
+    PROJECTOR_MAC= \
+    TS_USERSPACE=1 \
+    PYTHONUNBUFFERED=1
 
 EXPOSE 5050
 
-CMD ["sh", "-c", "gunicorn app:app --bind 0.0.0.0:${PORT:-5050}"]
+CMD ["./entrypoint.sh"]

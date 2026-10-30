@@ -1700,6 +1700,37 @@
       return getProjectorManualOverride();
     }
 
+    // Backends fora da rede local: nuvem (funciona com o PC desligado) e o PC via Tailscale Serve
+    const CLOUD_API_URL = 'https://projector-adb-api.onrender.com';
+    const PC_API_URL = 'https://info-ntb113.tailc47a86.ts.net';
+    let resolvedApiBase = null;
+
+    // Token exigido pelo backend (salvo só neste navegador)
+    function getApiToken() {
+      return (localStorage.getItem('projector_api_token') || '').trim();
+    }
+
+    function pedirApiToken() {
+      const t = window.prompt('Token de acesso do painel (API_TOKEN configurado no servidor):', getApiToken());
+      if (t === null) return false;
+      localStorage.setItem('projector_api_token', t.trim());
+      return true;
+    }
+
+    // Escolhe o primeiro backend que responder ao /health (a nuvem gratuita leva ~1 min para acordar)
+    async function resolverApiBase() {
+      if (localStorage.getItem('projector_api_url')) return;
+      try {
+        resolvedApiBase = await Promise.any([CLOUD_API_URL, PC_API_URL].map(async (base) => {
+          const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(70000) });
+          if (!res.ok) throw new Error(res.status);
+          return base;
+        }));
+      } catch (e) {
+        resolvedApiBase = null;
+      }
+    }
+
     // Recupera a base de URL da API salva ou determina dinamicamente
     function getApiBase() {
       const saved = localStorage.getItem('projector_api_url');
@@ -1714,8 +1745,8 @@
       if (isLocal) {
         return window.location.origin;
       }
-      // No Cloudflare Pages (*.pages.dev, *.workers.dev) ou qualquer domínio em nuvem, aponta para Tailscale Serve HTTPS
-      return 'https://info-ntb113.tailc47a86.ts.net';
+      // No Cloudflare (*.workers.dev) ou qualquer domínio em nuvem: backend que respondeu primeiro
+      return resolvedApiBase || CLOUD_API_URL;
     }
 
     // Constrói a URL da rota (sem parâmetro obrigatório de ?ip= para usar auto-descoberta do backend)
@@ -1740,6 +1771,9 @@
       if (manualIp) {
         headers['X-Projector-IP'] = manualIp;
       }
+      if (getApiToken()) {
+        headers['X-Api-Token'] = getApiToken();
+      }
       opts.headers = headers;
 
       // AbortController com timeout para evitar travamento da UI
@@ -1751,6 +1785,11 @@
       try {
         const res = await fetch(url, opts);
         clearTimeout(timeoutId);
+        // Token ausente/errado: pede uma vez e repete a requisição
+        if (res.status === 401 && !options._retried && pedirApiToken()) {
+          initWebSocket();
+          return apiFetch(endpoint, Object.assign({}, options, { _retried: true }));
+        }
         return res;
       } catch (err) {
         clearTimeout(timeoutId);
@@ -1829,6 +1868,7 @@
           }
 
           socket = io(base, {
+            auth: { token: getApiToken() },
             transports: ['websocket', 'polling'],
             timeout: 6000,
             reconnectionAttempts: 4
@@ -2332,6 +2372,7 @@
         const sep = val.includes('?') ? '&' : '?';
         const testUrl = currentIp ? `${val}/status${sep}ip=${encodeURIComponent(currentIp)}` : `${val}/status`;
         const headers = currentIp ? { 'Accept': 'application/json', 'X-Projector-IP': currentIp } : { 'Accept': 'application/json' };
+        if (getApiToken()) headers['X-Api-Token'] = getApiToken();
         const res = await fetch(testUrl, { method: 'GET', headers: headers });
         if (res.ok) {
           const data = await res.json();
@@ -2541,10 +2582,12 @@
       if (e.target === configModal) fecharModalConfig();
     });
 
-    // Inicialização
-    initWebSocket();
-    checkStatus();
-    setInterval(checkStatus, 5000);
+    // Inicialização: descobre qual backend está no ar antes de conectar
+    resolverApiBase().finally(() => {
+      initWebSocket();
+      checkStatus();
+      setInterval(checkStatus, 5000);
+    });
   </script>
 </body>
 </html>

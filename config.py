@@ -27,8 +27,14 @@ def get_projector_target() -> str:
 # Auto-descoberta do projetor HY320 (ordem: Tailscale -> último IP -> MAC na ARP -> varredura da LAN)
 PROJECTOR_TAILSCALE_IP = os.environ.get("PROJECTOR_TAILSCALE_IP", "100.123.35.13")
 PROJECTOR_MAC = os.environ.get("PROJECTOR_MAC", "26:80:ab:03:43:dd")
-LAN_SUBNET = os.environ.get("LAN_SUBNET", "192.168.253.0/24")
+LAN_SUBNET = os.environ.get("LAN_SUBNET", "192.168.253.0/24")  # vazio desativa a varredura (nuvem)
 TAILSCALE_PACKAGE = "com.tailscale.ipn"
+
+# Nuvem: tailscaled em modo userspace (sem TUN); o ADB alcança 100.x via socat + 'tailscale nc'
+TAILSCALE_USERSPACE = os.environ.get("TS_USERSPACE", "0").lower() in ("1", "true")
+
+# Token exigido em todas as rotas (exceto /health e a página) quando definido. Obrigatório na nuvem.
+API_TOKEN = os.environ.get("API_TOKEN", "")
 
 # Configurações do Servidor Web Flask e WebSocket
 SERVER_HOST = os.environ.get("HOST", "0.0.0.0")

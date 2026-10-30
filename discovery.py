@@ -23,6 +23,7 @@ from config import (
     PROJECTOR_MAC,
     LAN_SUBNET,
     TAILSCALE_PACKAGE,
+    TAILSCALE_USERSPACE,
     get_projector_target,
     set_projector_ip,
 )
@@ -45,12 +46,66 @@ _started = False
 _on_change = None
 
 
+_forwards = {}  # alvo lógico (100.x:5555) -> (porta local, processo socat)
+_FORWARD_BASE_PORT = 15000
+
+
+def _is_tailnet(ip):
+    try:
+        return ipaddress.ip_address(ip) in ipaddress.ip_network("100.64.0.0/10")
+    except ValueError:
+        return False
+
+
+def serial(target):
+    """
+    Endereço que o ADB deve usar para o alvo lógico.
+    No modo userspace (nuvem) não existe rota do SO para 100.x, então cada alvo do tailnet
+    ganha um socat local que encaminha via 'tailscale nc'; fora disso o alvo é usado como está.
+    """
+    if not TAILSCALE_USERSPACE or not target:
+        return target
+    ip, port = target.rsplit(":", 1)
+    if not _is_tailnet(ip):
+        return target
+    with _lock:
+        fwd = _forwards.get(target)
+        if fwd and fwd[1].poll() is None:
+            return f"127.0.0.1:{fwd[0]}"
+        local_port = fwd[0] if fwd else _FORWARD_BASE_PORT + len(_forwards)
+        proc = subprocess.Popen(
+            ["socat", f"TCP-LISTEN:{local_port},bind=127.0.0.1,reuseaddr,fork",
+             f"EXEC:tailscale nc {ip} {port}"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        _forwards[target] = (local_port, proc)
+    time.sleep(0.3)  # socat precisa abrir o listen antes do adb connect
+    return f"127.0.0.1:{local_port}"
+
+
 def _adb(args, timeout=6):
+    # Traduz o alvo lógico de '-s X' e 'connect/disconnect X' para o endereço real do ADB
+    args = list(args)
+    for i, a in enumerate(args[:-1]):
+        if a in ("-s", "connect", "disconnect"):
+            args[i + 1] = serial(args[i + 1])
     try:
         res = subprocess.run([ADB_BIN] + args, capture_output=True, text=True, timeout=timeout)
         return res.returncode == 0, (res.stdout or res.stderr).strip()
     except Exception as e:
         return False, str(e)
+
+
+def _reachable(ip, port):
+    """Na nuvem pinga pelo Tailscale (sem rota do SO); localmente testa a porta TCP."""
+    if TAILSCALE_USERSPACE and _is_tailnet(ip):
+        try:
+            res = subprocess.run(["tailscale", "ping", "--c", "1", "--until-direct=false", "--timeout", "5s", ip],
+                                 capture_output=True, text=True, timeout=8)
+            return res.returncode == 0
+        except Exception:
+            return False
+    return _port_open(ip, port)
 
 
 def _port_open(ip, port=PROJECTOR_PORT, timeout=1.5):
@@ -75,15 +130,17 @@ def try_connect(target):
     if is_device(target):
         return True
     ip, port = target.rsplit(":", 1)
-    if not _port_open(ip, int(port)):
+    if not _reachable(ip, int(port)):
         return False
     _adb(["disconnect", target], timeout=4)
-    _, out = _adb(["connect", target], timeout=8)
+    _, out = _adb(["connect", target], timeout=10)
     return "connected to" in out.lower() and is_device(target)
 
 
 def _ip_from_arp(mac):
     """Procura na tabela ARP/neighbors o IP do MAC informado (Windows usa '-', Linux usa ':')."""
+    if not mac:
+        return None
     wanted = mac.lower().replace("-", ":")
     for cmd in (["arp", "-a"], ["ip", "neigh"]):
         try:
@@ -100,7 +157,9 @@ def _ip_from_arp(mac):
 
 def _scan_lan():
     """Varre a sub-rede em paralelo e retorna os IPs com a porta ADB aberta."""
-    hosts = [str(h) for h in ipaddress.ip_network(LAN_SUBNET, strict=False).hosts()]
+    if not LAN_SUBNET:
+        return []
+    hosts =[str(h) for h in ipaddress.ip_network(LAN_SUBNET, strict=False).hosts()]
     with ThreadPoolExecutor(max_workers=64) as pool:
         found = pool.map(lambda ip: ip if _port_open(ip, timeout=0.6) else None, hosts)
     return [ip for ip in found if ip]

@@ -6,6 +6,7 @@ import threading
 import time
 import base64
 import hashlib
+import hmac
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
@@ -18,6 +19,7 @@ from config import (
     SERVER_PORT,
     DEBUG_MODE,
     CORS_ORIGINS,
+    API_TOKEN,
     ADB_BIN,
     KEYCODES,
     APPS
@@ -32,7 +34,7 @@ CORS(
     app,
     resources={r"/*": {"origins": CORS_ORIGINS}},
     methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-Projector-IP"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-Projector-IP", "X-Api-Token"],
     allow_private_network=True,
     max_age=600,
 )
@@ -42,6 +44,27 @@ socketio = SocketIO(app, cors_allowed_origins=CORS_ORIGINS, async_mode="threadin
 
 # Posição virtual do cursor (Resolução nativa 1280x720)
 cursor_state = {"x": 640, "y": 360}
+
+# ----------------- AUTENTICAÇÃO (obrigatória quando exposto na internet) -----------------
+# O backend dá shell ADB no projetor e, na nuvem, fica dentro do tailnet: sem token,
+# qualquer um com a URL controlaria o projetor e alcançaria outros aparelhos da VPN.
+_PUBLIC_PATHS = {"/", "/health"}
+
+def _token_ok(token) -> bool:
+    return bool(token) and hmac.compare_digest(str(token), API_TOKEN)
+
+def _request_token():
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return request.headers.get("X-Api-Token") or request.args.get("token")
+
+@app.before_request
+def require_api_token():
+    if not API_TOKEN or request.method == "OPTIONS" or request.path in _PUBLIC_PATHS:
+        return None
+    if not _token_ok(_request_token()):
+        return jsonify({"status": "unauthorized", "message": "Token de acesso inválido ou ausente."}), 401
 
 def _normalize_target(raw: str) -> str:
     # Remove protocolos http/https e barras residuais caso o usuário envie URL completa
@@ -90,7 +113,7 @@ def resolve_target(custom_ip_or_target: str = None) -> str:
 def run_adb(args: list[str], target: str = None, timeout: int = 8) -> tuple[bool, str]:
     """Executa um comando ADB diretamente no projetor de forma dinâmica e segura."""
     resolved = resolve_target(target)
-    cmd = [ADB_BIN, "-s", resolved] + args
+    cmd = [ADB_BIN, "-s", discovery.serial(resolved)] + args
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         output = (res.stdout or res.stderr).strip()
@@ -109,7 +132,7 @@ def connect_projector(custom_target: str = None) -> tuple[bool, str]:
     """Conecta dinamicamente ao IP do projetor via ADB."""
     resolved = resolve_target(custom_target)
     try:
-        res = subprocess.run([ADB_BIN, "connect", resolved], capture_output=True, text=True, timeout=8)
+        res = subprocess.run([ADB_BIN, "connect", discovery.serial(resolved)], capture_output=True, text=True, timeout=8)
         out = (res.stdout or res.stderr).strip()
         success = "connected to" in out.lower() or "already connected" in out.lower()
         return success, out
@@ -511,7 +534,11 @@ def handle_touchpad_scroll(direction: str, target: str = None) -> dict:
 # ----------------- EVENTOS WEBSOCKET (TEMPO REAL) -----------------
 
 @socketio.on("connect")
-def ws_connect():
+def ws_connect(auth=None):
+    # O handshake do Socket.IO não passa pelo before_request do Flask
+    if API_TOKEN and not _token_ok((auth or {}).get("token") if isinstance(auth, dict) else None) \
+            and not _token_ok(_request_token()):
+        return False
     emit("status_update", get_projector_status())
 
 @socketio.on("ping_status")
@@ -790,9 +817,10 @@ def route_otimizar_profundo():
         ["shell", "cmd", "wifi", "set-wifi-saver-enabled", "false"],
         ["shell", "settings", "put", "global", "wifi_scan_always_enabled", "0"],
         ["shell", "settings", "put", "global", "ble_scan_always_enabled", "0"],
-        # 4. DNS de Alta Performance (Cloudflare 1.1.1.1)
-        ["shell", "settings", "put", "global", "private_dns_mode", "hostname"],
-        ["shell", "settings", "put", "global", "private_dns_specifier", "one.one.one.one"],
+        # 4. DNS do sistema (Private DNS desligado: o DoT para one.one.one.one quebrava a resolução
+        #    de nomes no projetor -> UnknownHostException www.youtube.com no SmartTube)
+        ["shell", "settings", "put", "global", "private_dns_mode", "off"],
+        ["shell", "settings", "delete", "global", "private_dns_specifier"],
         # 5. Renderização por Hardware GPU 2D
         ["shell", "setprop", "debug.hwui.renderer", "opengl"],
         ["shell", "settings", "put", "global", "force_gpu_rendering", "1"],
@@ -902,7 +930,7 @@ def route_screencap():
     target = resolve_target()
 
     # Executa screencap via exec-out para stream binário
-    cmd = [ADB_BIN, "-s", target, "exec-out", "screencap", "-p"]
+    cmd = [ADB_BIN, "-s", discovery.serial(target), "exec-out", "screencap", "-p"]
     try:
         proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8)
         if proc.returncode == 0 and len(proc.stdout) > 1000:
@@ -1002,6 +1030,8 @@ def get_network_ips():
     return ips
 
 if __name__ == "__main__":
+    if not API_TOKEN and os.environ.get("TS_USERSPACE"):
+        raise SystemExit("[-] API_TOKEN é obrigatório no modo nuvem (backend exposto na internet dentro do tailnet).")
     print("[*] Auto-descoberta do projetor iniciada (Tailscale -> ARP/MAC -> varredura da LAN)...")
     discovery.start(on_change=lambda: socketio.emit("status_update", get_projector_status()))
 
