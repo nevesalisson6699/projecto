@@ -24,6 +24,12 @@ def set_projector_ip(new_ip: str) -> str:
 def get_projector_target() -> str:
     return f"{get_projector_ip()}:{PROJECTOR_PORT}"
 
+# Auto-descoberta do projetor HY320 (ordem: Tailscale -> último IP -> MAC na ARP -> varredura da LAN)
+PROJECTOR_TAILSCALE_IP = os.environ.get("PROJECTOR_TAILSCALE_IP", "100.123.35.13")
+PROJECTOR_MAC = os.environ.get("PROJECTOR_MAC", "26:80:ab:03:43:dd")
+LAN_SUBNET = os.environ.get("LAN_SUBNET", "192.168.253.0/24")
+TAILSCALE_PACKAGE = "com.tailscale.ipn"
+
 # Configurações do Servidor Web Flask e WebSocket
 SERVER_HOST = os.environ.get("HOST", "0.0.0.0")
 SERVER_PORT = int(os.environ.get("PORT", 5050))

@@ -155,30 +155,54 @@
       fill: currentColor;
     }
 
-    /* CARD INTERATIVO DE GERENCIAMENTO DINÂMICO DE IP & ENDPOINT */
-    .offline-card {
-      background: linear-gradient(135deg, rgba(239, 68, 68, 0.14), rgba(245, 158, 11, 0.1));
-      border: 1px solid rgba(239, 68, 68, 0.4);
-      border-radius: 20px;
-      padding: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    /* SEÇÃO RETRÁTIL SECUNDÁRIA DE EMERGÊNCIA (IP MANUAL) */
+    .emergency-drawer {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 18px;
+      background: rgba(15, 23, 42, 0.65);
+      overflow: hidden;
+      transition: all 0.25s ease;
+      margin-top: 2px;
     }
 
-    @keyframes slideDown {
-      from { opacity: 0; transform: translateY(-10px); }
-      to { opacity: 1; transform: translateY(0); }
+    .emergency-drawer[open] {
+      border-color: rgba(56, 189, 248, 0.35);
+      background: rgba(15, 23, 42, 0.9);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
     }
 
-    .offline-title {
+    .emergency-summary {
+      padding: 10px 14px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
       display: flex;
       align-items: center;
+      justify-content: space-between;
+      list-style: none;
+      user-select: none;
+    }
+
+    .emergency-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .emergency-summary:hover {
+      color: #fff;
+    }
+
+    .emergency-content {
+      padding: 0 14px 14px;
+      display: flex;
+      flex-direction: column;
       gap: 8px;
-      color: #f87171;
-      font-size: 0.78rem;
-      font-weight: 700;
+      animation: fadeIn 0.2s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     .offline-desc {
@@ -1125,22 +1149,27 @@
       </div>
     </div>
 
-    <!-- CAMPO INTERATIVO DE GERENCIAMENTO DINÂMICO DE IP QUANDO OFFLINE -->
-    <div class="offline-card" id="offlineCard" style="display: none;">
-      <div class="offline-title">
-        <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
-        <span>Projetor Offline / Desconectado</span>
+    <!-- SEÇÃO RETRÁTIL SECUNDÁRIA (IP MANUAL EM CASO DE EMERGÊNCIA) -->
+    <details class="emergency-drawer" id="emergencyDrawer">
+      <summary class="emergency-summary">
+        <span>⚙️ Conexão Manual (Emergência)</span>
+        <span style="font-size: 0.65rem; opacity: 0.7;">Auto-descoberta ativa ▾</span>
+      </summary>
+      <div class="emergency-content">
+        <p class="offline-desc">
+          A conexão é descoberta automaticamente via Tailscale ou rede local. Preencha apenas se desejar forçar um IP ou Endpoint específico:
+        </p>
+        <div class="offline-input-row">
+          <input type="text" class="offline-input" id="dynamicIpInput" placeholder="Ex: 100.123.35.13 ou 192.168.253.112">
+          <button class="btn-reconnect" id="btnDynamicReconnect" onclick="atualizarIpDinamico()">
+            <span>Definir</span>
+          </button>
+          <button class="btn-reconnect" style="background: rgba(148, 163, 184, 0.2); padding: 0 10px;" onclick="limparIpManual()" title="Restaurar Auto-Descoberta">
+            <span>Reset</span>
+          </button>
+        </div>
       </div>
-      <p class="offline-desc">
-        Insira o IP local (ex: <code>192.168.253.112</code>), IP Tailscale (<code>100.x.x.x</code>) ou Endpoint de conexão (ex: <code>https://sua-api.onrender.com</code>):
-      </p>
-      <div class="offline-input-row">
-        <input type="text" class="offline-input" id="dynamicIpInput" placeholder="Ex: 192.168.253.112, 100.x.x.x ou https://sua-api.onrender.com">
-        <button class="btn-reconnect" id="btnDynamicReconnect" onclick="atualizarIpDinamico()">
-          <span>Reconectar</span>
-        </button>
-      </div>
-    </div>
+    </details>
 
     <!-- NAVEGAÇÃO POR ABAS (5 COLUNAS) -->
     <div class="tabs-nav">
@@ -1655,16 +1684,20 @@
     const toast = document.getElementById('toast');
     const configModal = document.getElementById('configModal');
     const apiInput = document.getElementById('apiInput');
-    const offlineCard = document.getElementById('offlineCard');
     const dynamicIpInput = document.getElementById('dynamicIpInput');
     const btnDynamicReconnect = document.getElementById('btnDynamicReconnect');
     let toastTimer = null;
     let socket = null;
 
-    // Retorna o IP dinâmico configurado (salvo no localStorage)
+    // Retorna eventual override manual de emergência (caso o usuário tenha inserido no menu retrátil)
+    function getProjectorManualOverride() {
+      const saved = localStorage.getItem('projector_manual_override_ip');
+      return (saved && saved.trim()) ? saved.trim() : '';
+    }
+
+    // IP dinâmico: vazio por padrão para permitir que o backend escolha o alvo descoberto
     function getProjectorIp() {
-      const saved = localStorage.getItem('projector_ip');
-      return (saved && saved.trim()) ? saved.trim() : '192.168.253.112';
+      return getProjectorManualOverride();
     }
 
     // Recupera a base de URL da API salva ou determina dinamicamente
@@ -1673,33 +1706,39 @@
       if (saved && saved.trim()) {
         return saved.trim().replace(/\/+$/, '');
       }
-      if (window.location.port === '5050' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      // Se executado localmente (na mesma rede ou na mesma máquina)
+      const isLocal = window.location.hostname === 'localhost' || 
+                      window.location.hostname === '127.0.0.1' || 
+                      window.location.hostname === '192.168.253.108' ||
+                      window.location.port === '5050';
+      if (isLocal) {
         return window.location.origin;
       }
-      return '';
+      // No Cloudflare Pages (*.pages.dev, *.workers.dev) ou qualquer domínio em nuvem, aponta para Tailscale Serve HTTPS
+      return 'https://info-ntb113.tailc47a86.ts.net';
     }
 
-    // Constrói a URL da rota injetando dinamicamente o IP do projetor na query string
+    // Constrói a URL da rota (sem parâmetro obrigatório de ?ip= para usar auto-descoberta do backend)
     function construirUrl(endpoint) {
       const base = getApiBase();
       const limpo = endpoint.replace(/^\/+/, '');
       let url = base ? `${base}/${limpo}` : `/${limpo}`;
-      const ip = getProjectorIp();
-      if (ip) {
+      const manualIp = getProjectorManualOverride();
+      if (manualIp) {
         const sep = url.includes('?') ? '&' : '?';
-        url += `${sep}ip=${encodeURIComponent(ip)}`;
+        url += `${sep}ip=${encodeURIComponent(manualIp)}`;
       }
       return url;
     }
 
-    // Helper universal para requisições assíncronas com envio automático do IP via Header e Query
+    // Helper universal para requisições assíncronas
     async function apiFetch(endpoint, options = {}) {
       const url = construirUrl(endpoint);
       const opts = Object.assign({}, options);
       const headers = Object.assign({}, opts.headers || {});
-      const currentIp = getProjectorIp();
-      if (currentIp) {
-        headers['X-Projector-IP'] = currentIp;
+      const manualIp = getProjectorManualOverride();
+      if (manualIp) {
+        headers['X-Projector-IP'] = manualIp;
       }
       opts.headers = headers;
 
@@ -1719,25 +1758,26 @@
       }
     }
 
-    // Inicializa o IP e URL salvos nos campos correspondentes imediatamente
+    // Inicializa o display e campos correspondentes imediatamente
     const targetDisplay = document.getElementById('targetIpDisplay');
-    const initialIp = getProjectorIp();
-    const savedApiUrl = localStorage.getItem('projector_api_url');
-    if (targetDisplay) {
-      targetDisplay.innerText = initialIp;
-    }
-    if (dynamicIpInput) {
-      dynamicIpInput.value = initialIp;
+    const manualIpSalvo = getProjectorManualOverride();
+    if (manualIpSalvo) {
+      if (targetDisplay) targetDisplay.innerText = `${manualIpSalvo} (Manual)`;
+      if (dynamicIpInput) dynamicIpInput.value = manualIpSalvo;
+      const drawer = document.getElementById('emergencyDrawer');
+      if (drawer) drawer.open = true;
+    } else {
+      if (targetDisplay) targetDisplay.innerText = 'Auto-descoberta ativa';
     }
 
-    // Persistência instantânea do IP ao digitar no campo
+    // Persistência ao digitar no campo de emergência
     if (dynamicIpInput) {
       dynamicIpInput.addEventListener('input', (e) => {
         const val = e.target.value.trim();
         if (val) {
           if (!val.startsWith('http://') && !val.startsWith('https://')) {
-            localStorage.setItem('projector_ip', val);
-            if (targetDisplay) targetDisplay.innerText = val;
+            localStorage.setItem('projector_manual_override_ip', val);
+            if (targetDisplay) targetDisplay.innerText = `${val} (Manual)`;
           } else {
             localStorage.setItem('projector_api_url', val);
           }
@@ -1816,67 +1856,56 @@
       const text = document.getElementById('statusText');
       const ipDisplay = document.getElementById('targetIpDisplay');
 
-      if (data && data.ip) {
-        ipDisplay.innerText = data.ip;
-        if (!dynamicIpInput.value) {
-          dynamicIpInput.value = data.ip;
-        }
-      }
+      if (!data) return;
 
-      if (data && data.status === 'online') {
-        dot.className = 'status-dot online';
-        text.innerText = 'Online';
-        offlineCard.style.display = 'none';
+      const isOnline = data.status === 'online';
+      if (isOnline) {
+        if (dot) dot.className = 'status-dot online';
+        const viaBadge = data.via ? ` (${data.via.toUpperCase()})` : '';
+        const ipFormatado = data.ip || (data.target ? data.target.split(':')[0] : 'Conectado');
+        if (text) {
+          text.innerText = data.label ? data.label.replace(/^[🟢🔴🟡\s]+/, '') : 'Conectado';
+        }
+        if (ipDisplay) {
+          ipDisplay.innerText = `${ipFormatado}${viaBadge}`;
+        }
       } else {
-        dot.className = 'status-dot offline';
-        text.innerText = 'Offline';
-        offlineCard.style.display = 'flex';
+        if (dot) dot.className = 'status-dot offline';
+        if (text) {
+          text.innerText = data.label ? data.label.replace(/^[🟢🔴🟡\s]+/, '') : 'Procurando...';
+        }
+        if (ipDisplay) {
+          ipDisplay.innerText = 'Auto-descoberta ativa...';
+        }
       }
     }
 
-    // Atualização Dinâmica do IP / Endpoint com Salvamento no localStorage
+    // Configuração Manual Dinâmica de IP / Endpoint (Menu Retrátil de Emergência)
     async function atualizarIpDinamico() {
-      const inputVal = dynamicIpInput.value.trim();
+      const inputVal = dynamicIpInput ? dynamicIpInput.value.trim() : '';
       if (!inputVal) {
         showToast('Digite um IP ou Endpoint válido!');
         return;
       }
 
       vibrar();
-      btnDynamicReconnect.innerText = 'Conectando...';
-      btnDynamicReconnect.disabled = true;
+      if (btnDynamicReconnect) {
+        btnDynamicReconnect.innerText = 'Salvando...';
+        btnDynamicReconnect.disabled = true;
+      }
 
       let targetApiUrl = null;
       let targetIp = null;
 
       if (inputVal.startsWith('http://') || inputVal.startsWith('https://')) {
         targetApiUrl = inputVal.replace(/\/+$/, '');
-        const matchIp = inputVal.match(/https?:\/\/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
-        if (matchIp) targetIp = matchIp[1];
-      } else if (inputVal.includes('.onrender.com') || inputVal.includes('.trycloudflare.com') || inputVal.includes('.railway.app') || inputVal.includes('.ngrok')) {
-        targetApiUrl = `https://${inputVal.replace(/\/+$/, '')}`;
-      } else if (inputVal.includes(':5050') || inputVal.includes(':5000')) {
-        targetApiUrl = `http://${inputVal.replace(/\/+$/, '')}`;
-        const matchIp = inputVal.match(/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
-        if (matchIp) targetIp = matchIp[1];
+        localStorage.setItem('projector_api_url', targetApiUrl);
       } else {
         targetIp = inputVal;
-        if (!getApiBase()) {
-          targetApiUrl = `http://${inputVal}:5050`;
-        }
+        localStorage.setItem('projector_manual_override_ip', targetIp);
       }
 
-      if (targetApiUrl) {
-        localStorage.setItem('projector_api_url', targetApiUrl);
-      }
-      if (targetIp) {
-        localStorage.setItem('projector_ip', targetIp);
-        document.getElementById('targetIpDisplay').innerText = targetIp;
-      } else {
-        document.getElementById('targetIpDisplay').innerText = targetApiUrl || inputVal;
-      }
-
-      showToast(`Atualizando endpoint para ${targetIp || targetApiUrl}...`);
+      showToast(`Atualizando para ${targetIp || targetApiUrl}...`);
       initWebSocket();
 
       try {
@@ -1884,25 +1913,32 @@
         const res = await apiFetch('api/config/ip', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          timeout: 4500
         });
-        const data = await res.json();
-        if (data.details) handleStatusUpdate(data.details);
-        showToast(data.message || 'IP atualizado com sucesso!');
-      } catch (err) {
-        try {
-          const stRes = await apiFetch('status');
-          const stData = await stRes.json();
-          handleStatusUpdate(stData);
-          showToast(`Conectado ao servidor!`);
-        } catch (stErr) {
-          showToast(`IP salvo no navegador!`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.details) handleStatusUpdate(data.details);
+          showToast(data.message || 'Configuração salva!');
         }
+      } catch (err) {
+        showToast('Salvo no navegador!');
       } finally {
-        btnDynamicReconnect.innerText = 'Reconectar';
-        btnDynamicReconnect.disabled = false;
+        if (btnDynamicReconnect) {
+          btnDynamicReconnect.innerText = 'Definir';
+          btnDynamicReconnect.disabled = false;
+        }
         setTimeout(checkStatus, 1000);
       }
+    }
+
+    // Restaura a auto-descoberta removendo qualquer IP manual forçado
+    function limparIpManual() {
+      vibrar();
+      localStorage.removeItem('projector_manual_override_ip');
+      if (dynamicIpInput) dynamicIpInput.value = '';
+      showToast('Auto-descoberta restaurada!');
+      checkStatus();
     }
 
     // Teclado Virtual: Tecla Individual Dinâmica
@@ -2197,7 +2233,6 @@
         }
       } catch (e) {
         showToast(`Erro de conexão ao abrir ${label}`);
-        if (offlineCard) offlineCard.style.display = 'flex';
       }
     }
 
@@ -2225,7 +2260,6 @@
         }
       } catch (e) {
         showToast(`Sem resposta do projetor (${cmd})`);
-        if (offlineCard) offlineCard.style.display = 'flex';
       }
     }
 

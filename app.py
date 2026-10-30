@@ -5,17 +5,19 @@ import socket
 import threading
 import time
 import base64
+import hashlib
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
+import discovery
 from config import (
     get_projector_ip,
-    set_projector_ip,
     get_projector_target,
     PROJECTOR_PORT,
     SERVER_HOST,
     SERVER_PORT,
     DEBUG_MODE,
+    CORS_ORIGINS,
     ADB_BIN,
     KEYCODES,
     APPS
@@ -23,55 +25,64 @@ from config import (
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# Habilita CORS completo em todas as rotas (Cloudflare Pages, etc)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+# Habilita CORS completo em todas as rotas (Cloudflare Pages, etc).
+# allow_private_network: o Chrome bloqueia um site público (pages.dev) chamando
+# localhost/IP privado sem o header Access-Control-Allow-Private-Network no preflight.
+CORS(
+    app,
+    resources={r"/*": {"origins": CORS_ORIGINS}},
+    methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-Projector-IP"],
+    allow_private_network=True,
+    max_age=600,
+)
 
 # Servidor WebSocket em tempo real para comunicação com o front-end na nuvem
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins=CORS_ORIGINS, async_mode="threading")
 
 # Posição virtual do cursor (Resolução nativa 1280x720)
 cursor_state = {"x": 640, "y": 360}
 
-@app.after_request
-def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, X-Projector-IP"
-    return response
+def _normalize_target(raw: str) -> str:
+    # Remove protocolos http/https e barras residuais caso o usuário envie URL completa
+    cleaned = re.sub(r'^https?://', '', str(raw).strip()).split('/')[0]
+    return cleaned if ":" in cleaned else f"{cleaned}:{PROJECTOR_PORT}"
 
 def resolve_target(custom_ip_or_target: str = None) -> str:
-    """Resolve dinamicamente o IP/alvo do projetor (IP:PORTA), priorizando o enviado na requisição."""
-    raw = custom_ip_or_target
-    if not raw:
-        try:
-            # 1. Header HTTP customizado enviado pelo front-end
-            raw = request.headers.get("X-Projector-IP")
-            # 2. Parâmetro de query string ?ip=...
-            if not raw:
-                raw = request.args.get("ip")
-            # 3. Corpo JSON da requisição
-            if not raw and request.is_json:
-                data = request.get_json(silent=True)
-                if isinstance(data, dict):
-                    raw = data.get("ip")
-            # 4. Formulário POST
-            if not raw and request.form:
-                raw = request.form.get("ip")
-        except RuntimeError:
-            # Fora do contexto de requisição HTTP (ex: inicialização ou thread independente)
-            pass
+    """
+    Resolve o alvo ADB do projetor (IP:PORTA).
+    - Alvo explícito passado pelo código: usado como está.
+    - Projetor já conectado pela auto-descoberta: sempre vence (o IP enviado pelo painel é só uma dica).
+    - Sem conexão: usa o IP da requisição (header/query/body/form) e o registra como dica para a descoberta.
+    """
+    if custom_ip_or_target and str(custom_ip_or_target).strip():
+        return _normalize_target(custom_ip_or_target)
+
+    if discovery.state["online"] and discovery.state["target"]:
+        return discovery.state["target"]
+
+    raw = None
+    try:
+        # 1. Header HTTP customizado enviado pelo front-end
+        raw = request.headers.get("X-Projector-IP")
+        # 2. Parâmetro de query string ?ip=...
+        if not raw:
+            raw = request.args.get("ip")
+        # 3. Corpo JSON da requisição
+        if not raw and request.is_json:
+            data = request.get_json(silent=True)
+            if isinstance(data, dict):
+                raw = data.get("ip")
+        # 4. Formulário POST
+        if not raw and request.form:
+            raw = request.form.get("ip")
+    except RuntimeError:
+        # Fora do contexto de requisição HTTP (ex: inicialização ou thread independente)
+        pass
 
     if raw and str(raw).strip():
-        cleaned = str(raw).strip()
-        # Remove protocolos http/https e barras residuais caso o usuário envie URL completa
-        cleaned = re.sub(r'^https?://', '', cleaned).split('/')[0]
-        if ":" not in cleaned:
-            target = f"{cleaned}:{PROJECTOR_PORT}"
-        else:
-            target = cleaned
-        # Atualiza a memória de último IP conhecido
-        ip_only = target.split(":")[0]
-        set_projector_ip(ip_only)
+        target = _normalize_target(raw)
+        discovery.add_hint(target)
         return target
 
     return get_projector_target()
@@ -126,30 +137,21 @@ def get_current_app(target: str = None) -> str:
     return "Área Inicial"
 
 def get_projector_status(target: str = None) -> dict:
-    """Verifica a conectividade e os parâmetros de saúde do projetor dinamicamente."""
-    resolved = resolve_target(target)
-    ip = resolved.split(":")[0]
-    
-    success, state_out = run_adb(["get-state"], target=resolved, timeout=4)
-    is_online = success and "device" in state_out.lower()
-    
-    if not is_online:
-        conn_ok, _ = connect_projector(custom_target=resolved)
-        if conn_ok:
-            success, state_out = run_adb(["get-state"], target=resolved, timeout=4)
-            is_online = success and "device" in state_out.lower()
-            
-    current_app = "Desconectado"
-    if is_online:
-        current_app = get_current_app(target=resolved)
+    """Status real da conexão, mantido pela thread de auto-descoberta (sem reconectar a cada chamada)."""
+    is_online = discovery.state["online"]
+    resolved = discovery.state["target"] if is_online else resolve_target(target)
 
     return {
         "status": "online" if is_online else "offline",
-        "ip": ip,
+        "label": "🟢 Projetor Conectado" if is_online else "🔴 Procurando Projetor...",
+        "ip": resolved.split(":")[0],
         "target": resolved,
-        "current_app": current_app,
+        "via": discovery.state["via"],
+        "scanning": discovery.state["scanning"],
+        "tailscale_hardened": discovery.state["tailscale_hardened"],
+        "current_app": get_current_app(target=resolved) if is_online else "Desconectado",
         "cursor": cursor_state,
-        "details": state_out if is_online else "Não conectado"
+        "details": "device" if is_online else "Não conectado"
     }
 
 FEEDBACK_HTML_CONTENT = """<!DOCTYPE html>
@@ -253,7 +255,7 @@ FEEDBACK_HTML_CONTENT = """<!DOCTYPE html>
     height: 100%;
     width: 100%;
     background: linear-gradient(90deg, #38bdf8, #22c55e);
-    animation: countdown 3.0s linear forwards;
+    animation: countdown 6.0s linear forwards;
   }
   @keyframes countdown {
     from { width: 100%; }
@@ -268,7 +270,7 @@ FEEDBACK_HTML_CONTENT = """<!DOCTYPE html>
   </div>
   <div class="msg-title">Executado, Acunha!!!</div>
   <div class="msg-sub">Otimizações & Sistema Atualizados com Sucesso</div>
-  <button id="closeBtn" class="btn-close" autofocus onclick="dismiss()">Fechar [OK]</button>
+  <button id="closeBtn" class="btn-close" autofocus onclick="dismiss()">Fechar [VOLTAR]</button>
   <div class="timer-bar">
     <div class="timer-fill"></div>
   </div>
@@ -286,6 +288,9 @@ FEEDBACK_HTML_CONTENT = """<!DOCTYPE html>
 </body>
 </html>"""
 
+# Nome versionado pelo conteúdo: qualquer alteração no HTML gera um arquivo novo no projetor
+FEEDBACK_REMOTE_PATH = "/data/local/tmp/feedback_%s.html" % hashlib.sha1(FEEDBACK_HTML_CONTENT.encode("utf-8")).hexdigest()[:8]
+
 _last_feedback_time = 0
 _feedback_lock = threading.Lock()
 
@@ -293,7 +298,7 @@ def trigger_projector_feedback(target: str = None, message: str = "Executado, ac
     """
     Dispara feedback visual na tela grande do projetor Android via ADB:
     1. Notificação nativa via 'cmd notification post'
-    2. Janela/diálogo flutuante na UI do Android com botão 'Fechar' e auto-close de 3 segundos
+    2. Janela/diálogo flutuante na UI do Android com botão 'Fechar' e auto-close após ~9 segundos
     Executado em thread assíncrona para manter a resposta da API instantânea.
     """
     global _last_feedback_time
@@ -315,17 +320,17 @@ def trigger_projector_feedback(target: str = None, message: str = "Executado, ac
             # Evita colisões se outro diálogo foi aberto recentemente
             now = time.time()
             with _feedback_lock:
-                if now - _last_feedback_time < 3.2 and not force_dialog:
+                if now - _last_feedback_time < 9 and not force_dialog:
                     return
                 _last_feedback_time = now
 
             # 2. Garante que o arquivo HTML de feedback existe no projetor
-            check_ok, _ = run_adb(["shell", "test", "-f", "/data/local/tmp/feedback.html"], target=resolved)
+            check_ok, _ = run_adb(["shell", "test", "-f", FEEDBACK_REMOTE_PATH], target=resolved)
             if not check_ok:
                 b64 = base64.b64encode(FEEDBACK_HTML_CONTENT.encode("utf-8")).decode("ascii")
                 write_cmd = [
                     "shell",
-                    f'echo "{b64}" | base64 -d > /data/local/tmp/feedback.html && chmod 666 /data/local/tmp/feedback.html'
+                    f'echo "{b64}" | base64 -d > {FEEDBACK_REMOTE_PATH} && chmod 644 {FEEDBACK_REMOTE_PATH}'
                 ]
                 run_adb(write_cmd, target=resolved)
 
@@ -333,14 +338,18 @@ def trigger_projector_feedback(target: str = None, message: str = "Executado, ac
             view_cmd = [
                 "shell", "am", "start",
                 "-a", "android.intent.action.VIEW",
-                "-d", "file:///data/local/tmp/feedback.html",
+                "-d", f"file://{FEEDBACK_REMOTE_PATH}",
                 "-t", "text/html",
                 "com.android.htmlviewer/.HTMLViewerActivity"
             ]
-            run_adb(view_cmd, target=resolved)
+            _, view_out = run_adb(view_cmd, target=resolved)
+            # 'am start' retorna 0 mesmo quando a Activity não existe na ROM
+            if "Error" in view_out:
+                print(f"[-] HTMLViewer indisponível no projetor ({resolved}): {view_out}")
+                return
 
-            # 4. Aguarda 3.2s para exibição fluida e fecha com segurança
-            time.sleep(3.2)
+            # 4. O WebView leva ~3s para renderizar a frio neste aparelho; mantém ~6s visível e fecha
+            time.sleep(9)
             run_adb(["shell", "am", "force-stop", "com.android.htmlviewer"], target=resolved)
         except Exception as e:
             print(f"[-] Erro ao disparar feedback no projetor: {e}")
@@ -514,9 +523,8 @@ def ws_ping_status(data=None):
 def ws_set_ip(data):
     new_ip = data.get("ip", "").strip() if isinstance(data, dict) else ""
     if new_ip:
-        target = resolve_target(new_ip)
-        connect_projector(custom_target=target)
-    st = get_projector_status(target=new_ip)
+        discovery.prefer(_normalize_target(new_ip))
+    st = get_projector_status()
     socketio.emit("status_update", st)
 
 @socketio.on("send_command")
@@ -617,19 +625,19 @@ def route_update_ip():
     if not new_ip:
         return jsonify({"status": "error", "message": "IP não informado."}), 400
 
-    set_projector_ip(new_ip)
-    connect_ok, msg = connect_projector()
+    target = _normalize_target(new_ip)
+    connect_ok = discovery.prefer(target)
     st = get_projector_status()
     socketio.emit("status_update", st)
-    
+
     if connect_ok:
-        trigger_projector_feedback(target=get_projector_target(), message="Executado, acunha!", force_dialog=True)
+        trigger_projector_feedback(target=target, message="Executado, acunha!", force_dialog=True)
 
     return jsonify({
         "status": "success" if connect_ok else "warning",
-        "ip": get_projector_ip(),
+        "ip": target.split(":")[0],
         "connected": connect_ok,
-        "message": f"IP atualizado para {get_projector_ip()}! ({msg})",
+        "message": f"Conectado em {target}!" if connect_ok else f"{target} não respondeu; a auto-descoberta segue procurando.",
         "details": st
     })
 
@@ -801,11 +809,12 @@ def route_otimizar_profundo():
         ok, out = run_adb(cmd, target=target, timeout=4)
         results.append({"cmd": " ".join(cmd), "success": ok, "out": out.strip()})
 
-    # Instalação do Projectivy Launcher se o APK estiver baixado
-    projectivy_path = os.path.join(os.path.dirname(__file__), "projectivy.apk")
-    if os.path.exists(projectivy_path):
-        install_ok, install_out = run_adb(["install", "-r", projectivy_path], target=target, timeout=25)
-        results.append({"cmd": "install projectivy.apk", "success": install_ok, "out": install_out.strip()})
+    # Instalação dos APKs leves (Projectivy Launcher e SmartTube) se estiverem baixados
+    for apk_name in ("projectivy.apk", "smarttube.apk"):
+        apk_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), apk_name)
+        if os.path.exists(apk_path):
+            install_ok, install_out = run_adb(["install", "-r", apk_path], target=target, timeout=180)
+            results.append({"cmd": f"install {apk_name}", "success": install_ok, "out": install_out.strip()})
 
     # Dispara a tela comemorativa interativa no projetor
     trigger_projector_feedback(target=target, message="Executado, Acunha!!!", force_dialog=True)
@@ -993,18 +1002,12 @@ def get_network_ips():
     return ips
 
 if __name__ == "__main__":
-    target = get_projector_target()
-    print(f"[*] Conectando ao projetor em {target}...")
-    connected, msg = connect_projector()
-    if connected:
-        print(f"[+] Conectado com sucesso ao projetor em {get_projector_ip()}!")
-    else:
-        print(f"[-] Aviso na conexão ADB: {msg}")
+    print("[*] Auto-descoberta do projetor iniciada (Tailscale -> ARP/MAC -> varredura da LAN)...")
+    discovery.start(on_change=lambda: socketio.emit("status_update", get_projector_status()))
 
     network_ips = get_network_ips()
     print("=" * 60)
     print("  PAINEL DE CONTROLE INTELIGENTE DO PROJETOR (WEBSOCKET + REST)")
-    print(f"  Alvo ADB Atual : {get_projector_target()}")
     print(f"  Acesso Local   : http://localhost:{SERVER_PORT}")
     for ip in network_ips:
         print(f"  Acesso na Rede : http://{ip}:{SERVER_PORT}")
